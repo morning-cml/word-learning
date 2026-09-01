@@ -74,6 +74,76 @@ def test_没填_Key_时不发请求():
     assert [s["id"] for s in r["steps"]] == ["connect", "json", "task", "clue"]
 
 
+# --------------------------------------------------------------- 检验本身不能崩
+
+class _StubProvider:
+    """L1/L2 都过的假端点，好让检验一路走到 L3。"""
+
+    def __init__(self, spec):
+        self.spec = spec
+
+    def list_models(self):
+        return ["deepseek-v4-pro"]
+
+    def chat(self, messages, **kw):
+        from core.provider.base import ChatResult
+
+        return ChatResult(text='{"ok": true}', model="m", ms=1)
+
+
+@pytest.fixture
+def stub_llm(monkeypatch):
+    """把 L3 的返回值换成指定形状，L4 一律给一个判得准的结果。"""
+    from core.llm.client import LLM
+    from core.provider import registry
+
+    def apply(l3_payload):
+        monkeypatch.setattr(
+            registry, "build",
+            lambda pid, key, **kw: _StubProvider(registry.get_spec(pid)))
+
+        def fake_json(self, messages, **kw):
+            if "river" in messages[-1]["content"]:        # L3
+                return l3_payload
+            return {"audits": [{"lemma": "tedious", "strength": "none"},
+                               {"lemma": "meticulous", "strength": "strong"}]}
+
+        monkeypatch.setattr(LLM, "json", fake_json)
+
+    return apply
+
+
+@pytest.mark.parametrize("name,payload", [
+    ("顶层是数组",         [{"en": "The river kept its promise and would return.", "zh": "河流守约。"}]),
+    ("sentences 里是字符串", {"sentences": ["river promise return"]}),
+    ("顶层是字符串",       "抱歉我不能完成"),
+    ("顶层是数字",         5),
+])
+def test_L3_拿到畸形形状时报告而不是崩(stub_llm, name, payload):
+    """检验在它该报告问题的那一刻崩掉，等于这一层不存在。
+
+    「顶层是数组」「sentences 里躺着字符串」都是真实发生过的形状。
+    原先这里直接 doc.get()，抛出的 AttributeError 不在 except 的捕获范围里，
+    会一路冒到接口层变成 HTTP 500：用户看到「检验请求失败」，
+    而不是「任务验收没过、原因是顶层不是对象」。
+    """
+    stub_llm(payload)
+    r = health.check("deepseek", "deepseek-v4-pro", "sk-test")
+
+    steps = {s["id"]: s for s in r["steps"]}
+    assert steps["task"]["ok"] is False, name
+    assert steps["task"]["error"], f"{name}：没过就得说清为什么"
+
+
+def test_L3_挂掉不影响最要紧的_L4(stub_llm):
+    """L4 验的是「审计判不判得准」——这个产品的价值判定全压在那次调用上。
+    L3 那边形状不对就把整次检验打断的话，它一次都跑不到。"""
+    stub_llm([{"en": "x", "zh": "y"}])
+    steps = {s["id"]: s for s in health.check("deepseek", "deepseek-v4-pro", "sk-test")["steps"]}
+    assert steps["task"]["ok"] is False
+    assert steps["clue"]["ok"] is True, "L4 应该照常跑完并给出结论"
+
+
 def test_L3_验收标准():
     """L3 要拦的是「模型吐得出格式但干不了活」——中文整片漏掉是最常见的一种。"""
     assert health._audit("不是对象") == ["顶层不是 json 对象"]

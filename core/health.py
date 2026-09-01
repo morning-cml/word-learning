@@ -152,7 +152,7 @@ def check(provider_id: str, model: str, api_key: str) -> dict[str, Any]:
         )
         issues = _audit(doc)
         l3["ok"] = not issues
-        sents = doc.get("sentences") or []
+        sents = _sentences(doc)
         if issues:
             l3["error"] = "；".join(issues)
         if sents:
@@ -221,6 +221,26 @@ def _calibrate(llm: LLM) -> dict[str, str]:
         purpose="structured", max_tokens=2500, json_schema=AUDIT_SCHEMA,
     ))
     return {a["lemma"].lower(): a["strength"] for a in audits}
+
+
+def _sentences(doc: Any) -> list[dict]:
+    """安全地取出句子列表，只用来给检验结果配一句样例。
+
+    这里绝不能直接 doc.get()。L3 存在的全部理由就是「模型可能吐出形状不对的
+    东西」，而顶层给成数组、sentences 里躺着字符串都是真实发生过的形状
+    （见 tasks/article/schema.py 顶上那段）。在这一行抛 AttributeError 的后果
+    比看上去大得多：它不在下面 except 的捕获范围里，会一路冒到接口层变成
+    HTTP 500——用户看到的是「检验请求失败」，而不是「任务验收没过、
+    原因是顶层不是对象」，而且最要紧的 L4 一次都跑不到。
+    检验本身在它该报告问题的时候崩掉，等于这一层不存在。
+    """
+    if isinstance(doc, list):
+        items: Any = doc
+    elif isinstance(doc, dict):
+        items = doc.get("sentences")
+    else:
+        items = None
+    return [s for s in items if isinstance(s, dict)] if isinstance(items, list) else []
 
 
 def _audit(doc: Any) -> list[str]:
