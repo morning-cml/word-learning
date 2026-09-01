@@ -1,5 +1,8 @@
 # Word Learning
 
+[![测试](https://github.com/morning-cml/word-learning/actions/workflows/test.yml/badge.svg)](https://github.com/morning-cml/word-learning/actions/workflows/test.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+
 把一批单词写成一篇有情节的短文，句子级中英对照，点一下就能把中文盖在英文上。
 
 单词书失效的原因是「词 → 中文释义」这种成对记忆没有可挂靠的语境。这个项目的核心不是
@@ -364,6 +367,35 @@ config/
 ```
 
 ---
+
+## 开发
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                          # Python 191 项
+
+cd tests/frontend
+npm install
+python make_fixtures.py
+npm test                        # 前端 59 项
+```
+
+测试全部离线：涉及模型的用 `FakeLLM`，返回什么由测试自己决定。真去调模型
+既跑不稳又要花钱，而且验不了「模型返回畸形数据时会怎样」——
+而那恰恰是这个项目最需要覆盖的部分。
+
+前端测试在 jsdom 里跑**服务端真实渲染的 HTML** 加 `web/static/js` 里
+**真实的模块**。但它测不了视觉：jsdom 没有布局引擎，CSS 完全不参与。
+改了 CSS 就自己开浏览器看一眼，细节见 [tests/frontend/README.md](tests/frontend/README.md)。
+
+改这个仓库之前建议先读 [CLAUDE.md](CLAUDE.md)——那里写的是「改的时候要注意什么」，
+包括几个只在特定启动方式下才暴露的坑。
+
+---
+
+## 许可证
+
+[GPL-3.0](LICENSE)。
 
 ## 数据来源
 

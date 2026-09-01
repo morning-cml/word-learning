@@ -20,4 +20,11 @@ data/last-error.log
 .idea/
 .vscode/
 
+# 测试产物
+.pytest_cache/
+tests/frontend/.fixtures/
+tests/frontend/node_modules/
+tests/frontend/package-lock.json
+requirements-ci.txt
+
 .DS_Store

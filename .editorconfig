@@ -1,0 +1,21 @@
+# 统一各编辑器的基本行为，免得同一个文件被不同人存成不同缩进/换行。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{js,mjs,json,css,html,yml,yaml}]
+indent_size = 2
+
+[*.md]
+# Markdown 里行尾两个空格是换行语义，不能修剪
+trim_trailing_whitespace = false
+
+[*.{bat,cmd}]
+# cmd 解释器对 LF 换行的处理不一致，必须 CRLF（与 .gitattributes 一致）
+end_of_line = crlf

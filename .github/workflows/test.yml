@@ -1,0 +1,61 @@
+name: 测试
+
+# 推 main 或开 PR 时跑。两个作业互相独立：
+# Python 那份覆盖管线、词表、存储、接口；前端那份在 jsdom 里跑真实页面和模块。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # 不装 PySide6：它只用于 app.py 那个桌面外壳，200 多 MB 而测试用不到。
+      # 少了它 app.py 导入会失败，但测试不 import app.py。
+      - name: 安装依赖（跳过 PySide6）
+        run: |
+          grep -v '^PySide6' requirements.txt > requirements-ci.txt
+          python -m pip install -q -r requirements-ci.txt -r requirements-dev.txt
+
+      - name: 跑测试
+        run: pytest
+
+  frontend:
+    name: 前端（jsdom）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # 夹具是拿真实的 FastAPI 应用渲染出来的，所以这边也要装 Python 依赖
+      - name: 安装依赖
+        run: |
+          grep -v '^PySide6' requirements.txt > requirements-ci.txt
+          python -m pip install -q -r requirements-ci.txt
+          npm install --prefix tests/frontend --no-audit --no-fund
+
+      - name: 导出夹具
+        working-directory: tests/frontend
+        run: python make_fixtures.py
+
+      - name: 跑测试
+        working-directory: tests/frontend
+        run: npm test

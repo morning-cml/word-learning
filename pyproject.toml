@@ -1,0 +1,33 @@
+# 这个项目不打包成 wheel（用法是克隆下来双击 run.bat），
+# 所以这里只放工具配置，不写 [project] 元数据。
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# tests/ 下的模块互相 import（conftest 里的样例数据、test_store 的 DOC），
+# 加上根目录才能同时 import 到 core/ tasks/ web/
+pythonpath = [".", "tests"]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    "error",
+    # starlette 的 TestClient 在提示换 httpx2，与本项目无关
+    "ignore::DeprecationWarning:starlette.*",
+    "ignore:.*httpx.*:UserWarning",
+    "default",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "E501",     # 行宽交给 formatter，注释里的中文按视觉宽度算会误报
+    "RUF001",   # 中文注释里的全角标点是有意的
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试里大量用中文函数名和局部 import（按需加载、避免夹具间的循环）
+"tests/*" = ["N802", "N803", "PLC0415"]

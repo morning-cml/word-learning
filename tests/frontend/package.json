@@ -1,0 +1,12 @@
+{
+  "name": "word-learning-frontend-tests",
+  "private": true,
+  "type": "module",
+  "description": "在 jsdom 里跑服务端真实渲染的 HTML + 仓库里真实的前端模块",
+  "scripts": {
+    "test": "node dom.test.mjs && node generate.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.0"
+  }
+}
