@@ -24,6 +24,9 @@ _engine = create_engine(
 _Session = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 
 
+# 一个词条实际有多少条语境。times_seen 应该永远等于它。
+_ACTUAL = "(SELECT COUNT(*) FROM encounters WHERE encounters.word_id = words.id)"
+
 # 最近一次备份的结果，供设置页显示。备份失败不该弹窗打断启动，
 # 但也不能全无声息——用户会以为自己有备份，其实没有。
 _backup_state: dict = {"ok": True, "made": False, "count": 0, "latest": "", "error": ""}
@@ -40,6 +43,17 @@ def init_db() -> None:
     _backup_state.update(backup.run(DB_PATH))
     Base.metadata.create_all(_engine)
     _migrate()
+
+    # 先数、再备份、最后才改。顺序是有讲究的：上面那次 backup.run() 会因为
+    # 「库自上次备份后没被写过」而跳过，而那恰好就是这次要动库的场景——
+    # 于是唯一一次真正改数据的启动反而没有当次快照兜底。
+    stale = _count_stale()
+    if stale:
+        _backup_state.update(backup.run(DB_PATH, force=True))
+        fixed = _reconcile_counts()
+        # 悄悄改用户的数据是这个项目最不该干的事，所以改了就说一声。
+        print(f"[数据] 已把 {fixed} 个词条的「见过几次」校回实际语境条数"
+              f"（改前的库已留档在 data/backups/）")
 
 
 def _migrate() -> None:
@@ -63,6 +77,50 @@ def _migrate() -> None:
                 conn.execute(
                     text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}')
                 )
+
+
+def _count_stale() -> int:
+    """有多少个词条的 times_seen 和事实对不上。只读，不写。
+
+    单独分出来是为了让 init_db 能「先知道要不要动库，再决定要不要强制留档」。
+    """
+    from sqlalchemy import text
+
+    with _engine.connect() as conn:
+        return conn.execute(text(
+            f"SELECT COUNT(*) FROM words WHERE times_seen IS NOT {_ACTUAL}"
+        )).scalar_one()
+
+
+def _reconcile_counts() -> int:
+    """把 times_seen 校回事实：它必须等于该词条实际的语境条数。
+
+    这个数字只有一个来源——record_encounter 每插一条 Encounter 加一次。
+    所以「见过几次」和「列得出几处语境」永远应该相等，不等就是数据脏了。
+
+    delete_article 已经改成按剩下的语境重算，但那只管以后：**在那之前用旧代码
+    删掉的文章，把计数永久留在了虚高的状态**，而重算只会在该词条又被别的删除
+    路径碰到时才发生——碰不到就一直错下去。本机库里 24 个词条有 5 个对不上
+    （abandon 显示 10 次，实际只有 3 处语境）。
+
+    这条不是小数点问题：times_seen 就是词条面板的「见过 N 次」和文库页的
+    「在多个语境中见过」——这个应用用来说明自己有用的那个指标。而且它没有
+    反馈回路，用户看到「见过 8 次」下面只列出 1 处语境时，多半只会以为
+    是别的什么意思。
+
+    放在 _migrate() 之后：init_db 第一步已经留好启动快照，出事能退回去。
+    只更新对不上的行，所以库是干净的时候这是一条零写入的语句，每次启动跑不亏。
+    last_seen_at 有意不动——它对不上只影响词库页的排序，而「这个时间到底
+    该表示什么」是另一个问题，不该顺手在这里替用户定了。
+    """
+    from sqlalchemy import text
+
+    with _engine.begin() as conn:
+        # IS NOT 而不是 !=：times_seen 可能是 NULL（老库补列时没有默认值），
+        # 而 NULL != 0 在 SQL 里是 NULL，不是真，那行就会被静静地跳过。
+        return conn.execute(text(
+            f"UPDATE words SET times_seen = {_ACTUAL} WHERE times_seen IS NOT {_ACTUAL}"
+        )).rowcount
 
 
 @contextmanager

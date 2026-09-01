@@ -56,16 +56,25 @@ def _snapshot(src: Path, dst: Path) -> None:
         partial.unlink(missing_ok=True)
 
 
-def run(db_path: Path, *, keep: int = KEEP) -> dict:
-    """留一份快照并清掉过期的。任何异常都吞掉，只在返回值里说明。"""
+def run(db_path: Path, *, keep: int = KEEP, force: bool = False) -> dict:
+    """留一份快照并清掉过期的。任何异常都吞掉，只在返回值里说明。
+
+    force=True 跳过「库没被写过就不重复留档」那条短路。调用方**明知自己
+    马上要动库**时必须传它，理由见下面那段注释。
+    """
     state: dict = {"ok": True, "made": False, "count": 0, "latest": "", "error": ""}
     try:
         if not db_path.is_file() or db_path.stat().st_size == 0:
             return state                      # 还没有库，没什么可备份的
 
         existing = snapshots(db_path)
-        if existing and existing[0].stat().st_mtime >= db_path.stat().st_mtime:
+        if not force and existing and existing[0].stat().st_mtime >= db_path.stat().st_mtime:
             # 上次备份之后库没被写过。一天开十次应用不该攒出十份一样的快照。
+            #
+            # 但这条短路有个反直觉的后果：**它恰好在最该留档的那一次生效**。
+            # 「库自上次备份后没被写过」正是「这次启动才要动它」的典型场景——
+            # 于是要改数据的那一次反而没有当次快照兜底。
+            # 所以准备写库的调用方要传 force=True，见 db._reconcile_counts。
             state["count"] = len(existing)
             state["latest"] = existing[0].name
             return state

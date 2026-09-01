@@ -110,6 +110,96 @@ def test_删光之后词条本身保留(temp_db):
     assert w is not None and w["status"] == 98 and w["times_seen"] == 0
 
 
+def test_启动时把虚高的计数校回事实(temp_db):
+    """delete_article 改成重算只管以后——**在那之前用旧代码删掉的文章，
+    把计数永久留在了虚高的状态**，而重算只会在该词条又被别的删除路径碰到时
+    才发生，碰不到就一直错下去。
+
+    错的是词条面板的「见过 N 次」和文库页的「在多个语境中见过」——
+    这个应用用来说明自己有用的那个指标，而且用户看到「见过 8 次」下面
+    只列出 1 处语境时，多半只会以为是别的什么意思，不会来报。
+    """
+    from sqlalchemy import text
+
+    save(temp_db)
+    with temp_db._engine.begin() as conn:      # 复刻旧代码留下的脏数据
+        conn.execute(text("UPDATE words SET times_seen = 8"))
+
+    temp_db.init_db()
+
+    with temp_db.session() as s:
+        w = temp_db.word_detail(s, "abandon")
+    assert w["times_seen"] == len(w["contexts"]) == 1
+
+
+def test_老库补出来的列是空的也能校回(temp_db):
+    """模拟一个「早于 times_seen 这个字段」的老库：_migrate 会用
+    ALTER TABLE ADD COLUMN 把列补回来，而补出来的列没有默认值，
+    已有的行全是 NULL。
+
+    这里必须用 IS NOT 比：NULL != 0 在 SQL 里得到的是 NULL 而不是真，
+    换成 != 的话这些行会被静静地跳过，「见过几次」就永远是空的。
+    """
+    import sqlite3
+
+    from sqlalchemy import text
+
+    if sqlite3.sqlite_version_info < (3, 35):
+        pytest.skip("DROP COLUMN 需要 SQLite 3.35+")
+
+    save(temp_db)
+    with temp_db._engine.begin() as conn:
+        conn.execute(text("ALTER TABLE words DROP COLUMN times_seen"))
+
+    temp_db.init_db()          # _migrate 补回列（全 NULL），_reconcile_counts 填上事实
+
+    with temp_db.session() as s:
+        w = temp_db.word_detail(s, "abandon")
+    assert w["times_seen"] == len(w["contexts"]) == 1
+
+
+def test_校正之前一定留得下改前的快照(temp_db, tmp_path):
+    """`backup.run()` 有条短路：库自上次备份后没被写过就不重复留档。
+
+    它恰好在最该留档的那一次生效——「库没被写过」正是「这次启动才要动它」
+    的典型场景，于是唯一一次真正改数据的启动反而没有当次快照兜底。
+    这条断言的是：校正动手之前，改前的状态确实被留下来了。
+    """
+    from sqlalchemy import text
+
+    from core.store import backup
+
+    save(temp_db)
+    with temp_db._engine.begin() as conn:            # 复刻旧代码留下的脏数据
+        conn.execute(text("UPDATE words SET times_seen = 8"))
+
+    # 造出真实场景：库自上次备份后没再被写过（用户上次打开应用之后就没生成过）
+    backup.run(temp_db.DB_PATH)
+    before = len(backup.snapshots(temp_db.DB_PATH))
+    assert before == 1
+    assert backup.run(temp_db.DB_PATH)["made"] is False, "前提：这时普通备份会跳过"
+
+    temp_db.init_db()
+
+    snaps = backup.snapshots(temp_db.DB_PATH)
+    assert len(snaps) == before + 1, "改数据之前必须多留一份"
+
+    # 最新那份留的是「改之前」的样子，出事能退回去
+    import sqlite3
+
+    old = sqlite3.connect(str(snaps[0])).execute(
+        "select times_seen from words limit 1").fetchone()[0]
+    assert old == 8, "快照留的应该是校正前的状态"
+    with temp_db.session() as s:
+        assert temp_db.word_detail(s, "abandon")["times_seen"] == 1
+
+
+def test_库是干净的时候一行都不写(temp_db):
+    """每次启动都跑，所以正常情况下必须是零写入，不能每开一次应用就动一次库。"""
+    save(temp_db)
+    assert temp_db._reconcile_counts() == 0
+
+
 def test_删不存在的文章返回_False(temp_db):
     with temp_db.session() as s:
         assert temp_db.delete_article(s, 999999) is False
