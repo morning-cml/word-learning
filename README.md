@@ -377,7 +377,7 @@ pytest                          # Python 191 项
 cd tests/frontend
 npm install
 python make_fixtures.py
-npm test                        # 前端 59 项
+npm test                        # 前端 61 项
 ```
 
 测试全部离线：涉及模型的用 `FakeLLM`，返回什么由测试自己决定。真去调模型
@@ -388,8 +388,12 @@ npm test                        # 前端 59 项
 **真实的模块**。但它测不了视觉：jsdom 没有布局引擎，CSS 完全不参与。
 改了 CSS 就自己开浏览器看一眼，细节见 [tests/frontend/README.md](tests/frontend/README.md)。
 
-改这个仓库之前建议先读 [CLAUDE.md](CLAUDE.md)——那里写的是「改的时候要注意什么」，
-包括几个只在特定启动方式下才暴露的坑。
+改这个仓库之前建议先读两份：
+
+- [CLAUDE.md](CLAUDE.md) —— 项目的判断依据、结构约定、跑测试的方法
+- [需要注意.md](需要注意.md) —— **踩过、而且以后还会再踩的坑**。收进去的都满足
+  两条：代码读起来是对的（隐蔽），而且是某类改动的固有陷阱（会重现）。
+  每条都标了现在有没有测试盯着
 
 ---
 

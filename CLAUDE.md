@@ -49,6 +49,9 @@ main.py   纯服务入口，想用浏览器时跑这个
 
 ## 改动时容易踩的坑
 
+下面是最常撞上的几条。**完整清单在 [需要注意.md](需要注意.md)**——
+那里按「什么改动会让它重现」组织，每条都标了有没有测试盯着。
+
 **模型返回的 json 形状不可信。** `json_schema` 只有 Kimi 会真的执行，
 DeepSeek 收下也不生效。任何 `llm.json()` 的返回值都要先过
 `tasks/article/schema.py` 的 `coerce_*`，不要直接 `.get()`。
@@ -77,7 +80,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 pytest                                  # Python，191 项
 
 cd tests/frontend
-npm install && python make_fixtures.py && npm test    # 前端，59 项
+npm install && python make_fixtures.py && npm test    # 前端，61 项
 ```
 
 测试全部离线：涉及模型的用 `conftest.py` 里的 `FakeLLM`，返回什么由测试决定。
