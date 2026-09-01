@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block body %}
+<main class="wrap">
+  <div class="page-head">
+    <h1>文库</h1>
+    <p class="lede">
+      同一批词过几天换个题材再生成一篇——多语境重复是词汇习得里性价比最高的手段，
+      也正好治单词书的单调。
+    </p>
+  </div>
+
+  <div class="card" id="summaryCard" hidden>
+    <div class="stats" id="summary"></div>
+  </div>
+
+  <div class="card">
+    <div class="table-scroll">
+      <table class="table" id="table" hidden>
+        <thead>
+          <tr><th>标题</th><th>目标词</th><th>篇幅</th><th>线索</th><th>模型</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty" hidden>还没有文章。去<a href="/">生成</a>第一篇。</div>
+  </div>
+</main>
+{% endblock %}

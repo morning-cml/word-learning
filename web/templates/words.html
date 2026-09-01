@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block head %}<link rel="stylesheet" href="/static/css/reader.css">{% endblock %}
+
+{% block body %}
+<main class="wrap">
+  <div class="page-head">
+    <h1>词库</h1>
+    <p class="lede">
+      读过的词都在这里，跨所有文章累计。<strong>在多个语境中见过</strong>的词才是真正记住的——
+      点任意一个词可以看它在每篇文章里的原句和当时的线索审计结论。
+    </p>
+  </div>
+
+  <div class="card" id="summaryCard" hidden>
+    <div class="stats" id="summary"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="align-items:center;margin-bottom:var(--sp-4)">
+      <div class="grow" style="max-width:280px">
+        <input type="text" id="search" placeholder="搜词或释义…" spellcheck="false">
+      </div>
+      <div class="chips" id="filters">
+        <button class="chip on" type="button" data-filter="all">全部</button>
+        <button class="chip" type="button" data-filter="learning">学习中</button>
+        <button class="chip" type="button" data-filter="multi">多语境</button>
+        <button class="chip" type="button" data-filter="once">只见过一次</button>
+        <button class="chip" type="button" data-filter="known">已掌握</button>
+      </div>
+    </div>
+
+    <div class="table-scroll">
+      <table class="table" id="table" hidden>
+        <thead>
+          <tr><th>词</th><th>CEFR</th><th>见过</th><th>掌握程度</th><th>形态</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty" hidden>还没有词条。去<a href="/">生成</a>第一篇文章。</div>
+  </div>
+</main>
+
+<aside class="panel" id="panel"></aside>
+{% endblock %}

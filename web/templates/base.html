@@ -1,0 +1,56 @@
+{#
+  所有页面的骨架。
+
+  加页面不用动这里——导航是遍历 web/pages.py 的注册表渲染的，
+  页面脚本由 main.js 按 <body data-page> 动态载入。
+  页面只需要覆写 head / body / 以及在 body 标签上加自己的 data-*。
+#}<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page.title }} · Word Learning</title>
+<script>
+  /* 必须在样式生效前跑：晚一步会先按系统配色画一帧，再跳到用户选的那套，
+     表现为刷新时闪一下另一种颜色。没存过偏好就什么都不设，交给媒体查询。 */
+  (function () {
+    try {
+      var t = localStorage.getItem('wl-theme');
+      if (t) document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+{# 内联 data URI，省掉一个请求，也免了每页控制台一条 favicon 404 #}
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%93%96%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/app.css">
+{% block head %}{% endblock %}
+</head>
+
+<body data-page="{{ page.id }}"{% block body_data %}{% endblock %}>
+
+<header class="topbar">
+  <a class="brand" href="/"><span class="mark">📖</span><span>Word&nbsp;Learning</span></a>
+
+  <nav class="topnav">
+    {% for item in nav_pages %}
+    <a href="{{ item.path }}"{% if item.id == active %} class="active"{% endif %}>
+      {%- if item.icon %}<span aria-hidden="true">{{ item.icon }}</span> {% endif -%}
+      {{ item.label }}
+    </a>
+    {% endfor %}
+  </nav>
+
+  <div class="topbar-end">
+    <span class="model-chip" id="modelChip" role="button" tabindex="0">…</span>
+    <button class="icon-btn" id="themeBtn" type="button" title="切换深浅色">☾</button>
+  </div>
+</header>
+
+{% block body %}{% endblock %}
+
+<div id="toasts"></div>
+
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

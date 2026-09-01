@@ -1,0 +1,12 @@
+# 运行所需的全部依赖。run.bat 会自动同步这个文件。
+#
+# 界面是 web/ 那一套 HTML/CSS/JS，由 app.py 起一个只监听 127.0.0.1 的本地服务，
+# 再用 Qt 窗口（内嵌 Chromium）显示出来。所以 fastapi 这几个不是「可选的 Web 版」，
+# 是主路径上的依赖。
+PySide6>=6.6          # 窗口外壳 + QtWebEngine（Chromium 随 PySide6-Addons 一起装）
+fastapi>=0.115
+uvicorn>=0.30
+jinja2>=3.1
+httpx>=0.27
+pyyaml>=6.0
+sqlalchemy>=2.0

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block head %}<link rel="stylesheet" href="/static/css/reader.css">{% endblock %}
+{% block body_data %} data-article-id="{{ params.article_id }}"{% endblock %}
+
+{% block body %}
+<div class="reader-bar">
+  <div class="segmented" id="modes">
+    <button type="button" data-mode="en" class="on">英文</button>
+    <button type="button" data-mode="zh">中文</button>
+    <button type="button" data-mode="both">对照</button>
+    <button type="button" data-mode="cloze" title="把生词挖空，先回忆再验证">回忆</button>
+  </div>
+  <button class="btn-sm" id="marks" type="button">高亮：开</button>
+  <button class="btn-sm" id="reveal" type="button" hidden>全部揭示</button>
+  <span class="cloze-progress" id="progress" hidden></span>
+  <span class="spacer"></span>
+  <span class="bar-hint" id="barHint">点句子翻译该句 · 点生词看全部语境</span>
+</div>
+
+<main class="reader-body">
+  <article class="doc" id="doc"></article>
+
+  <div class="card" id="statsCard" style="max-width:var(--measure);margin:var(--sp-8) auto 0" hidden>
+    <div class="card-head"><h2>这篇的数据</h2></div>
+    <div id="stats"></div>
+  </div>
+</main>
+
+<aside class="panel" id="panel"></aside>
+{% endblock %}

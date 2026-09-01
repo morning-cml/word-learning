@@ -1,0 +1,140 @@
+/* ===========================================================================
+   阅读器。单独成文件是因为它体量大、且只有 /read 用得上。
+
+   两条不显眼但要紧的规则：
+
+   · 中英是两个兄弟节点，切模式只换 display，绝不重新渲染。
+     这样「已揭示」的挖空状态在模式之间来回切也不会丢。
+
+   · 段落 min-height 在渲染后被 JS 锁到中英两种排版里较高的一侧。
+     中文比英文短，一换行数就变，读到一半位置就丢——从根上不产生高度变化，
+     比切换后再滚回去要干净。
+   =========================================================================== */
+
+.reader-bar {
+  position: sticky; top: var(--topbar-h); z-index: 30;
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-5);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  .reader-bar { background: var(--bg); }
+}
+.reader-bar .spacer { flex: 1; }
+.bar-hint { font-size: 12.5px; color: var(--faint); }
+.cloze-progress { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
+
+.reader-body { max-width: var(--page-max); margin: 0 auto; padding: var(--sp-6) var(--sp-5) var(--sp-8); }
+
+/* ------------------------------ 正文 ------------------------------ */
+
+article.doc {
+  font-family: var(--serif);
+  font-size: 19px;
+  line-height: 1.9;
+  max-width: var(--measure);
+  margin: 0 auto;
+  letter-spacing: .003em;
+  color: var(--text);
+}
+article.doc h1 {
+  font-family: var(--serif); font-size: 30px; line-height: 1.25;
+  margin: var(--sp-4) 0 var(--sp-1); letter-spacing: -.015em;
+}
+.doc-sub { font-family: var(--sans); font-size: 14px; color: var(--muted); margin-bottom: var(--sp-6); }
+.para { margin: 0 0 1.4em; }
+
+.s { cursor: pointer; border-radius: 3px; transition: background-color .12s var(--ease); }
+.s:hover { background: var(--accent-soft); }
+.s .zh { display: none; font-family: var(--sans); font-size: .93em; }
+.s.zh-on .en { display: none; }
+.s.zh-on .zh { display: inline; }
+
+/* 对照：译文跟在原文后，原文不消失。中文压小一档——CJK 字形填满字面框，
+   同磅值下视觉重量比拉丁字母大得多，不压就会反客为主。 */
+.doc.mode-both .s .en { display: inline; }
+.doc.mode-both .s .zh {
+  display: inline; font-family: var(--sans); font-size: .82em;
+  color: var(--muted); margin-left: .35em;
+}
+.doc.mode-both .s .zh::before { content: "「"; }
+.doc.mode-both .s .zh::after  { content: "」"; }
+
+/* ------------------------------ 目标词 ------------------------------ */
+
+.tw { position: relative; cursor: pointer; border-radius: 2px; }
+.tw .tw-word {
+  background: linear-gradient(transparent 62%, var(--accent-soft) 62%);
+  font-weight: 600; padding: 0 1px;
+}
+.tw .tw-blank { display: none; }
+.tw:hover .tw-word { background: var(--accent-soft); }
+.doc.hide-marks .tw .tw-word { background: none; font-weight: inherit; }
+
+/* 回忆模式：挖空，逼你先检索再验证 */
+.doc.mode-cloze .tw .tw-word { display: none; }
+.doc.mode-cloze .tw .tw-blank {
+  display: inline-block; font-family: var(--mono); font-weight: 700;
+  color: var(--accent); background: var(--accent-soft);
+  border-radius: 3px; padding: 0 2px; letter-spacing: -.04em;
+}
+.doc.mode-cloze .tw:hover .tw-blank { filter: brightness(.94); }
+.doc.mode-cloze .tw.revealed .tw-word  { display: inline; }
+.doc.mode-cloze .tw.revealed .tw-blank { display: none; }
+.doc.mode-cloze .tw.just-revealed .tw-word { animation: pop .7s var(--ease); }
+@keyframes pop {
+  0%   { background: var(--accent); color: var(--on-accent); border-radius: 3px; }
+  100% { background: linear-gradient(transparent 62%, var(--accent-soft) 62%); }
+}
+
+/* ------------------------------ 词条面板 ------------------------------ */
+
+.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 60;
+  width: min(430px, 92vw);
+  background: var(--surface); border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(101%);
+  transition: transform .22s var(--ease);
+  overflow-y: auto;
+}
+.panel.open { transform: none; }
+.panel-inner { padding: var(--sp-5) var(--sp-5) var(--sp-8); }
+.panel-close {
+  position: absolute; top: 12px; right: 14px;
+  width: 30px; height: 30px; padding: 0; line-height: 1; font-size: 18px;
+  border-radius: 50%; border: none; background: transparent; color: var(--muted);
+}
+.panel-close:hover { background: var(--surface-2); color: var(--text); }
+
+.panel-word { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; padding-right: 34px; }
+.panel-word h2 { font-family: var(--serif); font-size: 27px; margin: 0; letter-spacing: -.02em; }
+.panel-gloss {
+  background: var(--surface-2); border-radius: var(--radius-sm);
+  padding: 11px 14px; margin-top: var(--sp-3); font-size: 14px;
+}
+.panel-forms { font-size: 12.5px; color: var(--muted); margin-top: var(--sp-2); }
+.panel-label {
+  font-size: 11.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--faint); margin: var(--sp-5) 0 var(--sp-2);
+}
+.panel-label .hint { display: block; text-transform: none; letter-spacing: 0; margin-top: 4px; font-size: 12px; }
+.status-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ctx { padding: var(--sp-3) 0; border-top: 1px solid var(--line-soft); }
+.ctx-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 4px; }
+.ctx-head a { font-size: 12px; color: var(--muted); }
+.ctx-en { font-family: var(--serif); font-size: 15px; line-height: 1.6; }
+.ctx-en b { color: var(--accent); }
+.ctx-zh { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.ctx-clue {
+  font-size: 12.5px; color: var(--ok); margin-top: 6px;
+  padding-left: 9px; border-left: 2px solid var(--ok);
+}
+
+@media (max-width: 820px) {
+  article.doc { font-size: 17.5px; }
+  .reader-body { padding: var(--sp-5) var(--sp-4) var(--sp-7); }
+}

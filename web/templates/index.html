@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block body %}
+<main class="wrap narrow">
+
+  <div class="page-head">
+    <h1>把单词写成一篇文章</h1>
+    <p class="lede">
+      每个目标词出现时，上下文会带上足以推出词义的线索——这才是读文章记单词真正起作用的地方，
+      而不只是让词从眼前路过一次。
+    </p>
+  </div>
+
+  <div class="card">
+    <label class="field" for="words">目标词（换行、逗号或空格分隔都行）</label>
+    <textarea id="words" spellcheck="false"
+              placeholder="abandon&#10;silence&#10;confess&#10;hesitate&#10;fragile"></textarea>
+    <div class="hint" id="preview" style="margin-top:10px"></div>
+
+    <div class="row" style="margin-top:20px">
+      <div>
+        <label class="field" for="level">除目标词外的用词上限</label>
+        <select id="level" style="width:auto">
+          <option value="A2">A2 · 入门</option>
+          <option value="B1">B1 · 中级</option>
+          <option value="B2" selected>B2 · 中高级</option>
+          <option value="C1">C1 · 高级</option>
+        </select>
+      </div>
+      <span class="spacer"></span>
+      <button id="stop" type="button" hidden>停止</button>
+      <button class="btn-primary" id="go" type="button">开始生成</button>
+    </div>
+  </div>
+
+  {# 生成过程：一篇要跑 4-9 次模型调用、一两分钟，必须让人看见在干什么 #}
+  <div class="card" id="progressCard" hidden>
+    <div class="card-head">
+      <h2>生成过程</h2>
+      <span class="spacer"></span>
+      <span class="hint" id="progressMeta"></span>
+    </div>
+    <div class="timeline" id="timeline"></div>
+  </div>
+
+  <div class="card" id="resultCard" hidden>
+    <div class="card-head">
+      <h2>生成结果</h2>
+      <span class="spacer"></span>
+      <a class="btn btn-primary btn-sm" id="openReader" href="#">打开阅读器</a>
+    </div>
+    <div id="stats"></div>
+  </div>
+
+</main>
+{% endblock %}

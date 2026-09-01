@@ -1,0 +1,119 @@
+# 模型提供商注册表
+# ---------------------------------------------------------------------------
+# 新增一家模型 = 在这里加一段 YAML，不需要改任何 Python 代码。
+# 只要对方兼容 OpenAI Chat Completions 格式（国内绝大多数都兼容），就能直接接。
+#
+# 重要：model id 一定放在配置里，不要硬编码进代码。
+# 前车之鉴：kimi-k2.5 与整个 moonshot-v1 系列已于 2026-08-31 下线，
+# 任何把模型名写死在代码里的项目当天就全线报错。
+
+providers:
+
+  deepseek:
+    label: DeepSeek
+    base_url: https://api.deepseek.com/v1
+    key_url: https://platform.deepseek.com/api_keys
+    docs: https://api-docs.deepseek.com/
+    # 顺序即默认：第一个是默认模型。
+    # 实测同一段落对比（详见 README）：pro 只慢 30%，但差距全在最要命的地方——
+    #   flash: 句均 12 词（顶到规格下限）、超纲 3.6%、
+    #          "He made an accurate count of the stacks" —— accurate 换成任何
+    #          形容词句子都通，零语境线索，这一遍等于白读
+    #   pro:   句均 20 词、超纲 1.1%、
+    #          "each page was accurate — you could check any date and find the
+    #          exact headline" —— 破折号释义式强线索
+    # 语境线索是这个产品唯一的价值来源，所以默认用 pro。
+    models:
+      - id: deepseek-v4-pro
+        label: V4 Pro · 语境线索质量明显更好（默认）
+      - id: deepseek-v4-flash
+        label: V4 Flash · 快且便宜，但线索质量明显下降
+      - id: deepseek-v4-flash-vision-exp
+        label: V4 Flash Vision · 实验版，支持图片输入
+    capabilities:
+      json_object: true
+      json_schema: false        # DeepSeek 只有 json_object，没有 schema 约束
+      models_endpoint: true
+    quirks:
+      # 官方文档明确要求：prompt 中必须出现 "json" 字样并给出格式样例，否则 JSON 模式不生效
+      json_needs_keyword: true
+      # 官方文档承认：偶尔会返回空 content。实测根因见下面 reasoning 段
+      may_return_empty: true
+      # 思考模式下 temperature / top_p / penalty / logprobs 设了不报错但完全无效
+      sampling_ignored_when_thinking: true
+
+    reasoning:
+      # V4 系列是推理模型，max_tokens 把思考 token 一起算进去。
+      # 实测同一个写作 prompt 的思考量：552 / 2316 / 2389 / 2518 / 2633 / 3110，
+      # 长尾能冲到 8001 和 9000。预算给不足，思考就把正文挤成空字符串 ——
+      # 官方那句「偶尔返回空 content」根因就在这。
+      counts_toward_max_tokens: true
+      # headroom 要盖住长尾，不是盖住平均值。
+      # 实测 max_tokens 开到 20000 时思考反而只用了 2389（比 9000 时的 3110 还少），
+      # 说明思考量与预算无关、不会「涨满」—— 所以预算开大是免费的：
+      # 正常情况一分钱不多花，抖动时省下整整一次 30 秒的重试。
+      headroom: 12000
+      # 实测有效的关闭方式（thinking: false 会报 400，reasoning_effort: "none" 同样有效）
+      disable: { thinking: { type: disabled } }
+      # 只有这些用途关思考：探针只要一个 {"ok":true}，思考纯属浪费时间和钱。
+      #
+      # 写作与选题都保留思考。实测对比（同一 prompt、同一段落）：
+      #   思考开 → 26s，超纲 0-1.5%，句均 13-15 词，"like judging a mountain
+      #            for rolling downhill" 这种带画面的语境线索
+      #   思考关 →  4s，超纲 5.5%，句均 12 词，出现 "He never guessed his room
+      #            could fail so fast and carelessly" 这类不通顺的句子
+      # 语境线索质量是这个产品的全部价值，26 秒买它值得。
+      #
+      # 另：reasoning_effort: "low" 实测无效（思考 2316，与默认 2389 无区别），
+      # 别在这个档位上浪费时间。
+      disable_for: [probe]
+
+    temperatures:              # 取自 DeepSeek 官方按场景建议值
+      creative: 1.5            # 创意写作（正文生成）
+      translate: 1.3           # 翻译
+      structured: 1.0          # 结构化/分析（选题、校验修复）
+      probe: 0.0
+      # 注意：以上数值在思考模式下会被静默忽略（见 quirks）。留着是为了
+      # 关掉思考时、以及换用非推理模型时仍然生效。
+
+  kimi:
+    label: Kimi (Moonshot AI)
+    base_url: https://api.moonshot.ai/v1
+    key_url: https://platform.kimi.ai/console/api-keys
+    docs: https://platform.kimi.ai/docs/overview
+    models:
+      - id: kimi-k3
+        label: K3 · 旗舰，1M 上下文
+      - id: kimi-k2.6
+        label: K2.6 · 性价比，256K 上下文
+      - id: kimi-k2.7-code
+        label: K2.7 Code · 代码向，256K
+      - id: kimi-k2.7-code-highspeed
+        label: K2.7 Code Highspeed · 低延迟
+    capabilities:
+      json_object: true
+      json_schema: true         # Kimi 同时支持 JSON Mode 和 Structured Output
+      models_endpoint: true
+    quirks:
+      json_needs_keyword: false
+      may_return_empty: false
+    reasoning:
+      counts_toward_max_tokens: true
+      headroom: 12000
+      disable: { thinking: { type: disabled } }
+      disable_for: [probe]
+    temperatures:
+      creative: 1.0
+      translate: 0.8
+      structured: 0.6
+      probe: 0.0
+
+  # ---- 下面是扩展示例，填上 key 即可启用 ----
+  # openai_compatible:
+  #   label: 自定义（任意 OpenAI 兼容端点）
+  #   base_url: http://localhost:11434/v1     # 例：本地 Ollama
+  #   models:
+  #     - id: qwen3:14b
+  #       label: 本地 Qwen3 14B
+  #   capabilities: { json_object: true, json_schema: false, models_endpoint: true }
+  #   temperatures: { creative: 1.0, translate: 0.8, structured: 0.6 }

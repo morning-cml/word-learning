@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block body %}
+<main class="wrap narrow">
+  <div class="page-head">
+    <h1>设置</h1>
+    <p class="lede">
+      接入层走 OpenAI 兼容协议，再加一家模型只需要往 <code>config/providers.yaml</code>
+      里加一段配置，不用改代码。
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div class="grow">
+        <label class="field" for="provider">提供商</label>
+        <select id="provider"></select>
+      </div>
+      <div class="grow" style="flex:2">
+        <label class="field" for="model">模型</label>
+        <select id="model"></select>
+      </div>
+    </div>
+    <div class="hint" id="modelNote" style="margin-top:8px"></div>
+
+    <div style="margin-top:20px">
+      <label class="field" for="key">API Key</label>
+      <input type="password" id="key" placeholder="粘贴 Key；留空表示不改动">
+      <div class="hint" id="keyNote" style="margin-top:8px"></div>
+    </div>
+
+    <div class="row" style="margin-top:20px">
+      <button class="btn-primary" id="save" type="button">保存</button>
+      <button id="check" type="button">运行四层检验</button>
+      <button class="btn-ghost btn-sm" id="refresh" type="button">从服务端拉取模型列表</button>
+    </div>
+  </div>
+
+  <div class="card" id="checkCard" hidden>
+    <div class="card-head"><h2>正确性检验</h2></div>
+    <p class="hint" style="margin-top:0">
+      只测连通性是不够的——很多模型 key 有效、模型名也对，但就是不肯稳定吐合法 JSON，
+      或者中文整片漏掉。最后一层验的是语境线索审计本身：这个产品的价值全压在那次判断上，
+      而它判错时你是看不出来的——能看出语境够不够的人，本来就认识那个词。
+    </p>
+    <div id="steps"></div>
+    <div class="hint" id="checkSummary" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>词表与数据</h2></div>
+    <div id="dataInfo"></div>
+  </div>
+</main>
+{% endblock %}

@@ -1,0 +1,13 @@
+# 统一按 LF 存进仓库，检出时按平台还原。
+* text=auto eol=lf
+
+# 例外：这两个必须是 CRLF。
+# run.bat 用 cmd 解释，LF 换行在部分 Windows 环境下会让 goto/label 解析出错；
+# .gitattributes 自己也一并固定，免得日后有人改坏。
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# 二进制，别做换行转换也别在 diff 里展开
+*.db   binary
+*.png  binary
+*.ico  binary

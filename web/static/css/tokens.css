@@ -1,0 +1,152 @@
+/* ===========================================================================
+   设计令牌。想整体换风格，只改这一个文件；其余 CSS 一律只引用变量，不写死色值。
+   桌面版 ui/theme.py 的 Palette 是同一套数值的 Python 镜像，改这里记得同步那边。
+
+   三条取自实践的约束：
+
+   1. 浅色不用纯白。整屏 #fff 是眩光的主要来源，而这个应用的使用姿势是
+      "盯着一屏英文读五分钟"。底色压到暖白，靠明度差建立层次，
+      而不是靠"卡片比背景更白"。但也不能像纯工具类应用那样压得很暗——
+      正文阅读需要足够的字底对比度，所以阅读面（--surface）留在偏亮的一侧。
+
+   2. 文字色和填充色分成两套，别混用。
+      --accent 是**文字/描边色**，要在页面底色上够清楚；
+      --accent-fill 是**填充色**（主按钮的底），要暗到配得住白字。
+      深浅两套模式下这两者的诉求是相反的（暗底上链接要更亮、按钮底要更暗），
+      一个变量满足不了两边。
+
+   3. 主题走三态：没存过偏好 = 跟随系统（媒体查询），手动切过 = 认 data-theme。
+      桌面版 app.py 也是跟随系统的，两端保持一致。
+   =========================================================================== */
+
+:root {
+  /* ---- 表面：页面 < 卡片，靠明度差分层 ---- */
+  --bg:            #eeeae1;   /* 页面底 */
+  --surface:       #faf8f4;   /* 卡片 / 阅读面 */
+  --surface-2:     #e7e2d7;   /* 次级填充：输入框、chip、代码块 */
+  --surface-sunken:#e2ddd1;   /* 凹陷：日志、表头 */
+
+  /* ---- 文字：三级足够，再多就分不清了 ---- */
+  --text:   #22201c;
+  --muted:  #625d54;
+  --faint:  #8c877c;
+
+  --line:      #d8d2c5;
+  --line-soft: #e6e1d6;
+
+  /* ---- 品牌色：烧橘。这是 Word Learning 的识别色，深浅两套都保留它 ---- */
+  --accent:      #a8481a;   /* 文字 / 描边 */
+  --accent-fill: #a8481a;   /* 填充底，配白字 */
+  --accent-hover:#8c3a13;
+  --accent-soft: #f6e4d5;   /* 目标词高亮、选中态的浅底 */
+  --on-accent:   #ffffff;
+
+  /* ---- 语义色：同样分文字/填充两套 ---- */
+  --ok:        #2b6b48;
+  --ok-fill:   #2b6b48;
+  --ok-soft:   #dcebe0;
+  --warn:      #8a5a05;
+  --warn-fill: #8a5a05;
+  --warn-soft: #f5e7cc;
+  --bad:       #a03328;
+  --bad-fill:  #a03328;
+  --bad-soft:  #f5dedb;
+
+  --shadow:   0 1px 2px rgba(60, 50, 35, .05), 0 4px 14px rgba(60, 50, 35, .07);
+  --shadow-lg:0 8px 34px rgba(60, 50, 35, .16);
+
+  --radius:    12px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+
+  /* ---- 间距：4 的倍数，只留这几档，免得每处随手写一个新值 ---- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px;
+
+  /* ---- 字体 ---- */
+  --serif: "Iowan Old Style", "Source Serif 4", "Source Serif Pro", Constantia,
+           Georgia, Cambria, "Songti SC", "Noto Serif CJK SC", serif;
+  --sans:  Inter, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+           "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --mono:  "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+
+  /* 正文栏宽。一行 66 个字符左右最好读，窗口再宽也不让它摊平。
+     必须是绝对长度：写成 40em 的话，em 相对各元素自身字号，
+     19px 的正文算出 760px、15px 的卡片算出 600px，同一栏的两块会对不齐。 */
+  --measure: 760px;
+  --page-max: 1180px;
+  --topbar-h: 56px;
+
+  --ease: cubic-bezier(.4, 0, .2, 1);
+}
+
+/* 深色：没手动切过时跟随系统 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:            #15141a;
+    --surface:       #1d1c23;
+    --surface-2:     #26252e;
+    --surface-sunken:#121118;
+
+    --text:   #eae7f0;
+    --muted:  #a09bad;
+    --faint:  #726d80;
+
+    --line:      #322f3b;
+    --line-soft: #292630;
+
+    /* 暗底上品牌色要提亮才看得清，但按钮底反而要压暗才配得住白字 */
+    --accent:      #ef9a63;
+    --accent-fill: #a24e21;
+    --accent-hover:#b95c28;
+    --accent-soft: #3b2a1c;
+    --on-accent:   #ffffff;
+
+    --ok:        #63c98d;
+    --ok-fill:   #1f6a43;
+    --ok-soft:   #1c2f24;
+    --warn:      #e3b264;
+    --warn-fill: #8a6414;
+    --warn-soft: #302719;
+    --bad:       #ec7a6e;
+    --bad-fill:  #8f3227;
+    --bad-soft:  #31201e;
+
+    --shadow:    0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .35);
+    --shadow-lg: 0 10px 38px rgba(0, 0, 0, .5);
+  }
+}
+
+/* 手动切到深色：与上面那块保持同一份数值 */
+:root[data-theme="dark"] {
+  --bg:            #15141a;
+  --surface:       #1d1c23;
+  --surface-2:     #26252e;
+  --surface-sunken:#121118;
+
+  --text:   #eae7f0;
+  --muted:  #a09bad;
+  --faint:  #726d80;
+
+  --line:      #322f3b;
+  --line-soft: #292630;
+
+  --accent:      #ef9a63;
+  --accent-fill: #a24e21;
+  --accent-hover:#b95c28;
+  --accent-soft: #3b2a1c;
+  --on-accent:   #ffffff;
+
+  --ok:        #63c98d;
+  --ok-fill:   #1f6a43;
+  --ok-soft:   #1c2f24;
+  --warn:      #e3b264;
+  --warn-fill: #8a6414;
+  --warn-soft: #302719;
+  --bad:       #ec7a6e;
+  --bad-fill:  #8f3227;
+  --bad-soft:  #31201e;
+
+  --shadow:    0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 10px 38px rgba(0, 0, 0, .5);
+}
