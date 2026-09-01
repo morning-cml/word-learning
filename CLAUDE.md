@@ -78,10 +78,10 @@ python.exe），以及报错有地方显示。改用 `pythonw` / `start` 隐藏�
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest                                  # Python，191 项
+pytest                                  # Python，219 项
 
 cd tests/frontend
-npm install && python make_fixtures.py && npm test    # 前端，61 项
+npm install && python make_fixtures.py && npm test    # 前端，78 项
 ```
 
 测试全部离线：涉及模型的用 `conftest.py` 里的 `FakeLLM`，返回什么由测试决定。
