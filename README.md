@@ -46,10 +46,14 @@
 所以之后不管代码怎么改、加了什么依赖，双击它都还能用。
 
 ```
-run.bat            正常启动
-run.bat --check    只检查并修好环境，不启动应用（顺带报告能不能找到 Edge）
-run.bat --reset    删掉 .venv 完全重建
+run.bat                  正常启动
+run.bat --check          只检查并修好环境，不启动应用（顺带报告能不能找到 Edge）
+run.bat --reset          删掉 .venv 完全重建，然后照常启动
+run.bat --reset --check  重建完就停下，不启动
 ```
+
+**`--reset` 重建完会接着启动**——它是「环境坏了，重置一下继续用」，不是「只重建」。
+想重建完就停下，加上 `--check`。
 
 `--reset` 只删 `.venv`。文章、词条、学习状态在 `data/app.db`，API Key 在
 `config/settings.local.json`，都不受影响。

@@ -23,9 +23,12 @@ rem
 rem  用法：
 rem     双击即可。首次启动会自动建环境装依赖，之后每次一两秒。
 rem
-rem     run.bat            正常启动
-rem     run.bat --check    只检查并修好环境，不启动应用
-rem     run.bat --reset    删掉 .venv 重建，环境彻底坏了用这个
+rem     run.bat                  正常启动
+rem     run.bat --check          只检查并修好环境，不启动应用
+rem     run.bat --reset          删掉 .venv 重建，然后照常启动
+rem     run.bat --reset --check  重建完就停下，不启动
+rem
+rem  --reset 是「环境坏了，重置一下继续用」，所以重建完会接着启动。
 rem ======================================================================
 
 set "VENV=.venv"
