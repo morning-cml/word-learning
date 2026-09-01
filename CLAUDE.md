@@ -39,8 +39,7 @@ core/     业务地基，不依赖上层
   health.py  四层正确性检验
 tasks/    「一件能对着词表做的事」。新增功能在这里加子类，core/ 和 web/ 不用改
 web/      唯一一套界面。pages.py 是页面注册表，加页面改这里一行
-app.py    桌面外壳：起本地服务 + Qt 窗口内嵌 Chromium
-main.py   纯服务入口，想用浏览器时跑这个
+main.py   唯一入口：起本地服务 + 用 Edge 打开。跑在浏览器里，没有第二套 UI
 ```
 
 依赖方向单向：`web/` → `tasks/` → `core/`。`core/` 里不要 import 上层。
@@ -65,9 +64,11 @@ DeepSeek 收下也不生效。任何 `llm.json()` 的返回值都要先过
 **模型名一律走配置，不进代码。** `kimi-k2.5` 和整个 `moonshot-v1` 系列
 已于 2026-08-31 下线；把模型名写死的项目当天全线报错。
 
-**`pythonw` 下 `sys.stdout` 是 `None`。** 任何 print、任何往 stdout 装
-handler 的库都会当场炸（uvicorn 就是）。而这正是双击 `run.bat` 的真实路径——
-**只用 `python app.py` 测是测不出来的**。
+**别把控制台窗口藏起来。** `run.bat` 现在是前台跑 `main.py`，那个窗口就是服务本身，
+关掉即退出。看着不好看，但换掉两样东西：用户有办法结束进程（否则只能去任务管理器找
+python.exe），以及报错有地方显示。改用 `pythonw` / `start` 隐藏它的话，
+`sys.stdout` 会变成 `None`——任何 print、任何往 stdout 装 handler 的库都会当场炸
+（uvicorn 就是），而异常死在后台线程里，表现出来只是「双击没反应」。
 
 **改 CSS 之后 jsdom 测试给不了任何保证。** 它没有布局引擎，
 `offsetHeight` 恒为 0，CSS 完全不参与。视觉改动要自己开浏览器看，

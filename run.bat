@@ -7,10 +7,12 @@ title Word Learning
 rem ======================================================================
 rem  一键启动。
 rem
-rem  界面是 web/ 那一套页面，由 app.py 起一个本地服务再用 Qt 窗口显示出来。
-rem  用起来还是一个应用窗口：没有浏览器、没有地址栏、不用先启动什么。
+rem  做的事只有一件：起一个只监听 127.0.0.1 的本地服务，再用 Edge 打开它。
+rem  界面是 web/ 那一套 HTML/CSS/JS，跑在浏览器里。
 rem
-rem  这不是打包好的可执行文件——它每次都直接跑当前源码，并且在启动前
+rem  这个窗口就是服务本身，关掉它程序就退出。
+rem
+rem  它不是打包好的可执行文件——每次都直接跑当前源码，并且在启动前
 rem  自己把环境修好：
 rem     .venv 不存在        -> 自动创建
 rem     requirements 变了   -> 自动重装依赖
@@ -19,25 +21,20 @@ rem     CEFR 词表缺失       -> 自动下载
 rem  所以之后不管代码怎么改、加了什么依赖，双击它都还能用。
 rem
 rem  用法：
-rem     双击即可。首次启动会自动建环境装依赖，之后每次约 1 秒。
+rem     双击即可。首次启动会自动建环境装依赖，之后每次一两秒。
 rem
-rem     run.bat            正常启动，不留控制台窗口
-rem     run.bat -c         带控制台启动，能看到运行日志，排查问题用
+rem     run.bat            正常启动
 rem     run.bat --check    只检查并修好环境，不启动应用
 rem     run.bat --reset    删掉 .venv 重建，环境彻底坏了用这个
 rem ======================================================================
 
 set "VENV=.venv"
 set "PY=%VENV%\Scripts\python.exe"
-set "PYW=%VENV%\Scripts\pythonw.exe"
 set "STAMP=%VENV%\.deps-hash"
-set "CONSOLE="
 set "RESET="
 set "CHECKONLY="
 
 for %%A in (%*) do (
-    if /i "%%~A"=="-c"        set "CONSOLE=1"
-    if /i "%%~A"=="--console" set "CONSOLE=1"
     if /i "%%~A"=="--reset"   set "RESET=1"
     if /i "%%~A"=="--check"   set "CHECKONLY=1"
 )
@@ -82,32 +79,26 @@ if not exist "data\cefr.csv" (
 rem ---------------------------------------------------------------- 启动
 if defined CHECKONLY (
     echo.
-    "%PY%" -c "import sys,PySide6,fastapi,sqlalchemy,httpx; print('[检查] 环境正常  Python ' + sys.version.split()[0] + '  PySide6 ' + PySide6.__version__ + '  FastAPI ' + fastapi.__version__)"
+    "%PY%" -c "import sys,fastapi,uvicorn,sqlalchemy,httpx; print('[检查] 环境正常  Python ' + sys.version.split()[0] + '  FastAPI ' + fastapi.__version__)"
     "%PY%" -c "import sys; sys.path.insert(0,'.'); from core.lexicon import cefr; print('[检查] 词表 ' + ('CEFR-J ' if cefr.is_real_data() else '内置兜底 ') + str(cefr.size()) + ' 词')"
     "%PY%" -c "import sys; sys.path.insert(0,'.'); from core import settings; p,m=settings.active(); print('[检查] 模型 ' + p + ' / ' + m + ('  Key 已配置' if settings.api_key(p) else '  尚未配置 Key'))"
     "%PY%" -c "import sys; sys.path.insert(0,'.'); from core.store import db; db.init_db(); s=db.backup_state(); print('[检查] 备份 ' + (('失败：' + s['error']) if not s['ok'] else (str(s['count']) + ' 份快照，最近 ' + s['latest']) if s['count'] else '暂无数据可备份'))"
+    "%PY%" -c "import sys; sys.path.insert(0,'.'); import main; p=main._edge_path(); print('[检查] Edge ' + (p if p else '没找到，启动时会退回系统默认浏览器'))"
     echo.
     echo 环境就绪，可以直接双击 run.bat 启动。
     exit /b 0
 )
 
-if defined CONSOLE (
-    echo [启动] 带控制台运行 ...
+rem 前台跑，这个窗口就是服务。不用 start / pythonw 把它藏起来：
+rem 藏了之后用户没有任何办法结束它，只能去任务管理器找 python.exe。
+"%PY%" main.py
+set "CODE=!errorlevel!"
+if not "!CODE!"=="0" (
     echo.
-    "%PY%" app.py
-    set "CODE=!errorlevel!"
-    echo.
-    echo 应用已退出，退出码 !CODE!
+    echo 应用异常退出，退出码 !CODE!
     pause
-    exit /b !CODE!
 )
-
-rem 用 pythonw 启动：没有控制台窗口。异常不会因此丢失——app.py 会把
-rem 完整堆栈写进 data\last-error.log 并弹一个系统对话框。
-rem
-rem 这里不要加 >nul 2>&1 之类的重定向：实测会让 start 起不来应用。
-start "" "%PYW%" app.py
-exit /b 0
+exit /b !CODE!
 
 
 rem ======================================================================
@@ -151,7 +142,7 @@ if errorlevel 1 (
 )
 
 rem MSYS2 / Cygwin 版的 Python 会建出 bin/ 布局的 venv，而且装不上带
-rem 编译扩展的包（PySide6、pydantic 都会失败）。这里提前拦下来。
+rem 编译扩展的包（pydantic 就会失败）。这里提前拦下来。
 if not exist "%PY%" (
     echo.
     echo [错误] 虚拟环境建好了，但里面没有 Scripts\python.exe。
@@ -178,7 +169,7 @@ if exist "%STAMP%" set /p OLDHASH=<"%STAMP%"
 set "NEED="
 set "BROKEN="
 if not "!REQHASH!"=="!OLDHASH!" set "NEED=1"
-"%PY%" -c "import importlib.util as u,sys; sys.exit(0 if all(u.find_spec(m) for m in ('PySide6','fastapi','uvicorn','jinja2','sqlalchemy','httpx','yaml')) else 1)" >nul 2>&1
+"%PY%" -c "import importlib.util as u,sys; sys.exit(0 if all(u.find_spec(m) for m in ('fastapi','uvicorn','jinja2','sqlalchemy','httpx','yaml')) else 1)" >nul 2>&1
 if errorlevel 1 (
     set "NEED=1"
     set "BROKEN=1"
@@ -194,7 +185,7 @@ if defined BROKEN (
 ) else if defined OLDHASH (
     echo [依赖] requirements.txt 有变化，正在同步 ...
 ) else (
-    echo [依赖] 正在安装依赖（首次需要几分钟，PySide6 带着 Chromium 比较大）...
+    echo [依赖] 正在安装依赖（首次需要一两分钟）...
 )
 
 "%PY%" -m pip install --quiet --disable-pip-version-check --upgrade pip
@@ -208,7 +199,7 @@ if errorlevel 1 (
 )
 
 rem 装完再确认一遍，避免 pip 返回 0 但包其实没装上
-"%PY%" -c "import importlib.util as u,sys; sys.exit(0 if all(u.find_spec(m) for m in ('PySide6','fastapi','uvicorn','jinja2','sqlalchemy','httpx','yaml')) else 1)" >nul 2>&1
+"%PY%" -c "import importlib.util as u,sys; sys.exit(0 if all(u.find_spec(m) for m in ('fastapi','uvicorn','jinja2','sqlalchemy','httpx','yaml')) else 1)" >nul 2>&1
 if errorlevel 1 (
     echo.
     echo [错误] 依赖装完了但关键包仍然导入不了。
