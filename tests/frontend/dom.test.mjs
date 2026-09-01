@@ -85,7 +85,9 @@ console.log('\n3. 阅读页（真实文章数据）');
   check('每个目标词都有明文层和挖空层',
         tws.every((t) => t.querySelector('.tw-word') && t.querySelector('.tw-blank')));
   check('句子分中英两层', qa(ctx, '.s .en').length === qa(ctx, '.s .zh').length);
-  check('标题已渲染', !!q(ctx, '.doc h1'));
+  check('标题渲染的是夹具里那篇', q(ctx, '.doc h1').textContent === 'The Wrong Number');
+  check('目标词就是 abandon 与 silence',
+        tws.map(t => t.dataset.lemma).sort().join() === 'abandon,silence');
 
   const modeBtn = (m) => q(ctx, `#modes button[data-mode="${m}"]`);
   modeBtn('zh').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
@@ -136,15 +138,17 @@ console.log('\n4. 词库页（筛选 / 搜索）');
   await mod.init({});
   const rows = () => qa(ctx, '#table tbody tr');
   const total = (API['/api/words'].words || []).length;
-  check('渲染全部词条', rows().length === total, `${rows().length}/${total}`);
+  check('渲染三个词条', rows().length === 3 && total === 3, `${rows().length}/${total}`);
   check('汇总条出现', !q(ctx, '#summaryCard').hidden);
   check('掌握程度画成点或标签',
         rows().every((r) => r.querySelector('.meter') || r.querySelector('.tag')));
 
   const multiBtn = q(ctx, '#filters button[data-filter="multi"]');
   multiBtn.dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
-  const expectMulti = (API['/api/words'].words || []).filter((w) => (w.times_seen || 0) > 1).length;
-  check('筛选「多语境」', rows().length === expectMulti, `${rows().length}/${expectMulti}`);
+  //  夹具里 abandon 出现在两篇，silence 与 confess 各一篇
+  check('筛选「多语境」只剩 abandon',
+        rows().length === 1 && rows()[0].dataset.lemma === 'abandon',
+        rows().map(r => r.dataset.lemma).join());
   check('筛选按钮高亮唯一', qa(ctx, '#filters button.on').length === 1);
 
   q(ctx, '#filters button[data-filter="all"]').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
@@ -162,7 +166,10 @@ console.log('\n5. 文库页');
   const mod = await import(JS('pages/library.js'));
   await mod.init({});
   const rows = qa(ctx, '#table tbody tr');
-  check('渲染文章列表', rows.length === API['/api/articles'].articles.length, `${rows.length} 行`);
+  check('渲染两篇文章', rows.length === 2, `${rows.length} 行`);
+  check('线索列显示 2/2 与 1/2',
+        rows.map(r => r.children[3].textContent.trim()).sort().join() === '1/2,2/2',
+        rows.map(r => r.children[3].textContent.trim()).join());
   check('每行有删除按钮', rows.every((r) => r.querySelector('.del')));
   check('线索列有值', rows.some((r) => /\d+\/\d+/.test(r.children[3].textContent)));
   check('标题链到阅读页', rows[0].querySelector('a[href^="/read/"]') !== null);

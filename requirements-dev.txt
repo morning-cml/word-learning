@@ -1,0 +1,5 @@
+# 开发/测试用。运行应用本身不需要这些。
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   pytest
+-r requirements.txt
+pytest>=8.0
