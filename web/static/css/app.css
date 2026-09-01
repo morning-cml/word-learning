@@ -93,11 +93,17 @@ code {
 /* ============================== 页面骨架 ============================== */
 
 .wrap { max-width: var(--page-max); margin: 0 auto; padding: var(--sp-6) var(--sp-5) var(--sp-8); }
-.wrap.narrow { max-width: 760px; }
+.wrap.narrow { max-width: var(--page-narrow); }
 .wrap.reading { max-width: 100%; padding-top: var(--sp-4); }
 
-.page-head { margin-bottom: var(--sp-5); }
-.page-head .lede { color: var(--muted); max-width: 62ch; margin: 0; }
+/* 页头带一道竖向色条。加它不是为了好看：五个页面原本长得一模一样，
+   只有标题文字不同，切换页面时没有任何「换地方了」的信号。 */
+.page-head {
+  margin-bottom: var(--sp-6); padding-left: var(--sp-4);
+  border-left: 3px solid var(--accent); border-radius: 2px;
+}
+.page-head h1 { font-size: 30px; margin-bottom: var(--sp-2); }
+.page-head .lede { color: var(--muted); max-width: 82ch; margin: 0; font-size: 14.5px; }
 
 /* ============================== 卡片 ============================== */
 
@@ -110,6 +116,10 @@ code {
   box-shadow: var(--shadow);
 }
 .card > :last-child { margin-bottom: 0; }
+/* 卡片顶部一道极细的高光，暗色下卡片才有「面」而不是一块色块 */
+.card { position: relative; }
+.card.lift { transition: transform .16s var(--ease), box-shadow .16s var(--ease); }
+.card.lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
 .card-head {
   display: flex; align-items: baseline; gap: var(--sp-3);
   margin-bottom: var(--sp-3);
@@ -198,13 +208,34 @@ button.chip { cursor: pointer; }
 
 /* ============================== 数据条 ============================== */
 
-.stats { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
-.stat { display: flex; flex-direction: column; gap: 1px; }
-.stat b {
-  font-family: var(--mono); font-size: 21px; font-weight: 600; line-height: 1.2;
-  color: var(--text);
+/* 数据瓦片。原来是一排裸数字，靠字号区分主次——扫过去只看到几个数，
+   看不出哪个重要、也看不出好坏。现在每个数字有自己的一块地，
+   顶上一道色条表示结论（绿=达标 / 橙=有问题），不用读标签就能判断。 */
+/* flex 而不是 grid：grid 的 1fr 会把 3 个瓦片摊满 1440px，
+   每个 460 宽、里面只有一个两位数，看着像排版事故。
+   flex + max-width 让它们保持「一块块」的样子，多了才换行。 */
+.stats { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.stat {
+  /* 104 是「六个瓦片能塞进 760 宽的阅读页卡片」算出来的：再宽一点
+     tokens 那块就会单独掉到第二行，看着像漏排。 */
+  flex: 1 1 104px; max-width: 200px;
+  position: relative; display: flex; flex-direction: column; gap: 2px;
+  padding: var(--sp-3) var(--sp-4) var(--sp-3);
+  background: var(--surface-2); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm); overflow: hidden;
 }
-.stat span { font-size: 12px; color: var(--faint); }
+.stat::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--faint);
+}
+.stat b {
+  font-family: var(--mono); font-size: 23px; font-weight: 600; line-height: 1.15;
+  color: var(--text); letter-spacing: -.02em;
+}
+.stat span { font-size: 11.5px; color: var(--faint); line-height: 1.4; }
+.stat.ok::before   { background: var(--ok); }
+.stat.warn::before { background: var(--warn); }
+.stat.bad::before  { background: var(--bad); }
 .stat.ok b   { color: var(--ok); }
 .stat.warn b { color: var(--warn); }
 .stat.bad b  { color: var(--bad); }
@@ -212,6 +243,7 @@ button.chip { cursor: pointer; }
 /* ============================== 提示条 ============================== */
 
 .hint { font-size: 13px; color: var(--muted); }
+.faint { color: var(--faint); }
 .note {
   font-size: 13px; line-height: 1.7; padding: 10px 14px;
   border-radius: var(--radius-sm); border: 1px solid var(--line);
@@ -235,9 +267,15 @@ button.chip { cursor: pointer; }
    把其余列挤到只剩一个字宽，"删除"就竖排成了"删/除"。 */
 .table .tight { width: 1%; white-space: nowrap; }
 .table .tight .hint { white-space: nowrap; }
-.table td { padding: var(--sp-3); border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.table td { padding: var(--sp-3); border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: none; }
+.table tbody tr { transition: background .12s var(--ease); }
 .table tbody tr:hover { background: var(--surface-2); }
+/* 行内的操作按钮平时收起来。原先每行最亮的元素是那个红色「删除」，
+   而删除恰恰是这张表最不该被先看到的东西。 */
+.table tbody tr .row-act { opacity: 0; transition: opacity .12s var(--ease); }
+.table tbody tr:hover .row-act,
+.table tbody tr:focus-within .row-act { opacity: 1; }
 .table .num { font-family: var(--mono); font-size: 13px; color: var(--muted); }
 .table-scroll { overflow-x: auto; }
 
@@ -260,6 +298,34 @@ button.chip { cursor: pointer; }
 .toast.warn{ border-left: 3px solid var(--warn); }
 .toast.leaving { opacity: 0; transform: translateY(6px); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* ============================== 进度条 ==============================
+   时间线回答「在干什么」，进度条回答「还要多久」——后者才是决定
+   「等一下还是先去干别的」的那个信息，而一篇要跑一两分钟。
+
+   条子在两次调用之间也要走：一次模型调用 30-40 秒，
+   如果只在调用完成时跳一格，中间那半分钟看着就是卡死了。 */
+
+.progress { margin-bottom: var(--sp-4); }
+.progress-track {
+  height: 6px; border-radius: 3px; overflow: hidden;
+  background: var(--surface-2); border: 1px solid var(--line-soft);
+}
+.progress-fill {
+  height: 100%; width: 0;
+  background: linear-gradient(90deg, var(--accent-fill), var(--accent));
+  border-radius: 3px;
+  transition: width .9s linear;
+}
+.progress-fill.done { background: var(--ok-fill); transition: width .3s var(--ease); }
+.progress-fill.bad  { background: var(--bad-fill); }
+.progress-legend {
+  display: flex; align-items: baseline; gap: var(--sp-3);
+  margin-top: 7px; font-size: 12.5px; color: var(--muted);
+}
+.progress-legend .spacer { flex: 1; }
+/* 不用等宽：这行基本是中文，落到等宽字体栈里会被拉得字距很开 */
+#progressEta { font-size: 12px; color: var(--faint); white-space: nowrap; }
 
 /* ============================== 进度时间线 ==============================
    生成一篇要跑 4-9 次模型调用、一两分钟。转圈圈的体验很差，所以把管线的
@@ -310,6 +376,7 @@ button.chip { cursor: pointer; }
 
 /* ============================== 词库 ============================== */
 
+.word-row { cursor: pointer; }
 .word-row .lemma { font-family: var(--serif); font-size: 16px; font-weight: 600; }
 .word-row .gloss { color: var(--muted); font-size: 13px; }
 .meter { display: inline-flex; gap: 2px; vertical-align: 1px; }
@@ -319,12 +386,244 @@ button.chip { cursor: pointer; }
 }
 .meter i.on { background: var(--accent); }
 
+/* ============================== 难度等级徽章 ==============================
+   CEFR 是这个应用的核心数据维度——整把难度标尺、超纲检测、用词上限
+   都建在它上面。可界面上 A1 到 C2 长得一模一样，等于把已经算出来的信息
+   又扔掉一次：用户扫一眼词库，看不出自己在学的是简单词还是难词。
+
+   色阶按色相环单向推进（绿→青→蓝→紫→橙→红），所以「越靠后越难」
+   是看出来的，不是读出来的；也不会出现 B1 看着比 C1 重的视觉倒挂。 */
+
+.lv {
+  display: inline-block; min-width: 30px; text-align: center;
+  font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  padding: 2px 7px; border-radius: 5px;
+  border: 1px solid currentColor; background: var(--lv-none-soft); color: var(--lv-none);
+}
+.lv-a1 { color: var(--lv-a1); background: var(--lv-a1-soft); }
+.lv-a2 { color: var(--lv-a2); background: var(--lv-a2-soft); }
+.lv-b1 { color: var(--lv-b1); background: var(--lv-b1-soft); }
+.lv-b2 { color: var(--lv-b2); background: var(--lv-b2-soft); }
+.lv-c1 { color: var(--lv-c1); background: var(--lv-c1-soft); }
+.lv-c2 { color: var(--lv-c2); background: var(--lv-c2-soft); }
+
+/* ============================== 线索强度条 ==============================
+   「N 个目标词里有几个语境线索充分」是这个产品唯一的价值指标，
+   原先在文库里是一个裸的 "3/5"，和旁边的「178 词」看起来一样重。
+   画成分段条之后，满格和缺格的差别在余光里就能看见，
+   不用逐行去读分数。 */
+
+.clue-bar { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.clue-seg { display: inline-flex; gap: 2px; }
+.clue-seg i {
+  width: 6px; height: 14px; border-radius: 2px; display: block;
+  background: var(--line); box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.clue-seg i.on   { background: var(--ok); box-shadow: none; }
+.clue-seg i.miss { background: var(--warn); opacity: .55; box-shadow: none; }
+.clue-bar b { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.clue-bar.full b { color: var(--ok); }
+/* 一段都没有（老文章没存过这个字段）时不要画成「全空」——
+   那会看成「线索一个都不达标」，而事实是「没测过」。 */
+.clue-none { font-family: var(--mono); font-size: 12.5px; color: var(--faint); }
+
+/* ============================== 计数条 ==============================
+   「见过 3 次」原先是一个裸数字。这个数就是本产品用来说明自己有用的
+   那个指标（多语境重复），值得有个形状。 */
+
+.count { display: inline-flex; align-items: center; gap: 7px; }
+.count b { font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--text); min-width: 12px; }
+.count .dots { display: inline-flex; gap: 2px; }
+.count .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); display: block; }
+.count .dots i.more { background: var(--faint); }
+.count.single b { color: var(--muted); font-weight: 500; }
+
+/* ============================== 掌握程度 ==============================
+   原来是 5 个 5px 的灰点，在两种主题下都近乎看不见。
+   改成带轨道的短条：没点亮的那几格也有形，才看得出「五格里亮了两格」。 */
+
+.meter { display: inline-flex; gap: 3px; vertical-align: middle; }
+.meter i {
+  width: 9px; height: 9px; border-radius: 2px; display: block;
+  background: var(--line); box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.meter i.on { background: var(--accent); box-shadow: none; }
+
+/* 词库表：词是短的，释义是长的，挤在同一列里就会出现
+   「左边 40% 有字、右边 60% 全空」——宽屏上尤其难看。拆成两列，
+   宽度自然分配给真正需要的那一列。 */
+.table .word-cell { width: 1%; white-space: nowrap; padding-right: var(--sp-5); }
+.table .gloss-cell { color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+/* 表格首列里的副信息。等级和时间并排放一行——各占一行的话
+   标题格就有四行高，整张表被撑得只剩五行可见。 */
+.row-meta { display: flex; align-items: center; gap: var(--sp-2); margin-top: 6px; }
+.row-time { font-size: 12px; color: var(--faint); font-family: var(--mono); }
+
+/* ============================== 区块标题 ============================== */
+
+.section-title {
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-size: 15px; font-weight: 600; color: var(--text); margin: 0 0 var(--sp-3);
+}
+.section-title .n {
+  font-family: var(--mono); font-size: 12px; font-weight: 600;
+  color: var(--muted); background: var(--surface-2);
+  border: 1px solid var(--line-soft); border-radius: var(--radius-pill); padding: 1px 9px;
+}
+
+/* ============================== 空态 ==============================
+   空页面原先只有一行灰字。第一次打开应用看到的就是它，
+   那一屏决定用户知不知道下一步该干什么。 */
+
+.empty-state { padding: var(--sp-7) var(--sp-5); text-align: center; }
+.empty-state .mark { font-size: 30px; line-height: 1; opacity: .5; }
+.empty-state h3 { margin: var(--sp-3) 0 var(--sp-1); font-size: 16px; }
+.empty-state p { color: var(--muted); font-size: 13.5px; margin: 0 auto; max-width: 46ch; }
+.empty-state .btn { margin-top: var(--sp-4); display: inline-block; }
+
+/* ============================== 逐词线索结论 ==============================
+   管线里最贵的那次调用（线索审计）产出的是逐词结论，原先只被压成一句
+   「有 2 个词线索不足」。用户知道有问题却不知道是哪两个词，
+   也就没法拿它们去再生成一篇——那次调用的钱等于白花了一半。 */
+
+.audit-list { margin-top: var(--sp-5); }
+.audit-list ul { list-style: none; margin: 0; padding: 0; }
+.audit-list li {
+  display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm);
+  border-left: 3px solid var(--warn); background: var(--surface-2);
+  margin-bottom: var(--sp-2);
+}
+.audit-list .aw { font-family: var(--serif); font-size: 15px; font-weight: 600; }
+.audit-list .why { flex: 1 1 220px; min-width: 0; font-size: 12.5px; color: var(--muted); }
+.audit-list .hint { margin-top: var(--sp-2); }
+
+/* ============================== 超纲词 ============================== */
+
+.offenders { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: var(--sp-4); }
+.offender {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 4px 2px 9px; border-radius: var(--radius-pill);
+  border: 1px solid var(--line); background: var(--surface-2);
+  font-family: var(--mono); font-size: 12px; color: var(--text);
+}
+
+/* ============================== 两栏骨架 ==============================
+   左边是「要干的事」，右边是「它在干什么」和「以前干过什么」。
+   窄屏塌成一栏，侧栏排到主栏后面——那时先看到输入框才是对的。 */
+
+.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, .85fr); gap: var(--sp-5); align-items: start; }
+.split-main { min-width: 0; }
+.split-side { min-width: 0; position: sticky; top: calc(var(--topbar-h) + var(--sp-5)); }
+.split-side .card { padding: var(--sp-4) var(--sp-5); }
+
+.form-actions { margin-top: var(--sp-5); align-items: flex-end; }
+.form-actions select { width: auto; }
+#preview { margin-top: var(--sp-3); }
+#preview:empty { display: none; }
+#preview.warn { color: var(--warn); }
+/* 输入框是这一页的主角，给够高度；顺带把左右两栏的高度拉平一些 */
+#words { min-height: 210px; }
+
+.presets { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+.presets .chip { cursor: pointer; transition: border-color .12s var(--ease), color .12s var(--ease); }
+.presets .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ============================== 四步说明 ============================== */
+
+.flow { list-style: none; margin: 0; padding: 0; counter-reset: flow; }
+.flow li {
+  counter-increment: flow; position: relative;
+  padding: 0 0 var(--sp-4) var(--sp-6);
+  font-size: 13px; line-height: 1.6;
+}
+.flow li::before {
+  content: counter(flow); position: absolute; left: 0; top: 1px;
+  width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--line);
+}
+/* 竖线把四步连起来，读成一条流程而不是四条并列的句子 */
+.flow li::after {
+  content: ""; position: absolute; left: 9.5px; top: 24px; bottom: 4px;
+  width: 1px; background: var(--line);
+}
+.flow li:last-child { padding-bottom: 0; }
+.flow li:last-child::after { display: none; }
+.flow b { display: block; color: var(--text); font-size: 13.5px; margin-bottom: 1px; }
+.flow span { color: var(--muted); }
+/* 第四步是这个产品和「让 AI 造几个例句」的分界线，值得比其它三步重 */
+.flow li.key::before { background: var(--accent-fill); color: var(--on-accent); border-color: var(--accent-fill); }
+.flow li.key b { color: var(--accent); }
+
+/* ============================== 用词上限说明 ==============================
+   下拉框里那四个字母（A2/B1/B2/C1）对用户不构成任何信息，而这一档决定了
+   整篇文章除目标词外能用多难的词——是这一页第二重要的选择。
+   四行既是说明也是控件：点一行就切到那一档，不用再回到下拉框。 */
+
+.guide-lead {
+  font-size: 13px; line-height: 1.75; color: var(--muted);
+  margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-2); border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.guide-lead b { color: var(--text); font-weight: 600; }
+
+.levels { list-style: none; margin: 0; padding: 0; }
+.levels li {
+  display: flex; align-items: flex-start; gap: var(--sp-3);
+  padding: var(--sp-3); border-radius: var(--radius-sm);
+  border: 1px solid transparent; cursor: pointer;
+  transition: background .12s var(--ease), border-color .12s var(--ease);
+}
+.levels li:hover { background: var(--surface-2); border-color: var(--line); }
+/* 当前选中的那一档。和下拉框双向同步——两处显示同一个状态却各说各话，
+   比只有下拉框还糟。 */
+.levels li.on { background: var(--surface-2); border-color: var(--accent); }
+.levels li .lv { flex: none; margin-top: 2px; }
+.lv-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lv-body b { font-size: 13.5px; color: var(--text); }
+.lv-body .d { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+/* 例词是这一档「最难能到什么程度」的实物样本，比任何形容词都直观 */
+.lv-body .ex { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+.lv-n {
+  flex: none; align-self: center; min-width: 62px; text-align: right;
+  font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+}
+.lv-n:empty::after { content: "—"; color: var(--faint); }
+.pick {
+  display: inline-block; margin-left: 6px; padding: 0 7px;
+  border-radius: var(--radius-pill); font-size: 10.5px; font-weight: 700;
+  background: var(--accent-fill); color: var(--on-accent);
+}
+
+/* ============================== 最近生成 ============================== */
+
+.recent { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-3); }
+.recent a {
+  display: block; padding: var(--sp-2) var(--sp-2); margin: 0 calc(var(--sp-2) * -1);
+  border-radius: var(--radius-sm); color: var(--text);
+  transition: background .12s var(--ease);
+}
+.recent a:hover { background: var(--surface-2); text-decoration: none; }
+.recent .t { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.4; }
+.recent .m { display: flex; align-items: center; gap: var(--sp-2); margin-top: 3px; font-size: 12px; color: var(--faint); }
+
 /* ============================== 响应式 ============================== */
+
+@media (max-width: 1080px) {
+  .split { grid-template-columns: 1fr; }
+  .split-side { position: static; }
+}
 
 @media (max-width: 820px) {
   .topbar { gap: var(--sp-3); padding: 0 var(--sp-4); }
   .brand span:not(.mark) { display: none; }
   .model-chip { display: none; }
   .wrap { padding: var(--sp-5) var(--sp-4) var(--sp-7); }
-  .stats { gap: var(--sp-5); }
+  .stats { gap: var(--sp-2); }
+  .stat { flex-basis: 104px; }
+  .page-head h1 { font-size: 24px; }
 }

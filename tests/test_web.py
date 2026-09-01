@@ -105,6 +105,50 @@ def test_文章列表带线索比(client, temp_db):
     assert row["clue"] == "2/3"
 
 
+def test_历史耗时给出每次调用的中位数(client, temp_db):
+    """首页要在刚开始生成时就给出「还需要多久」，那一刻还没有本次运行的
+    任何测量值。拿用户自己前几篇的实测当先验——这个数在不同模型、
+    不同网络下能差好几倍，写死一个常数只会给出误导性的倒计时。"""
+    from tests.test_store import DOC, META      # noqa: PLC0415
+
+    with temp_db.session() as s:
+        for ms, calls in ((60_000, 6), (120_000, 6), (30_000, 6)):   # 每次 10 / 20 / 5 秒
+            temp_db.save_article(s, DOC, {**META, "stats": {"ms": ms, "llm_calls": calls}})
+
+    d = client.get("/api/timing").json()
+    assert d["samples"] == 3
+    assert d["sec_per_call"] == 10.0, "取中位数：一次特别慢不该把估算拉飞"
+
+
+def test_没有历史时不编一个数出来(client):
+    """宁可不显示剩余时间，也不要给一个编出来的数字让人据此安排。"""
+    d = client.get("/api/timing").json()
+    assert d == {"samples": 0, "sec_per_call": None, "scope": "none"}
+
+
+def test_只统计存过用量的文章(client, temp_db):
+    """老文章的 stats 里没有 ms / llm_calls，混进来会被当成 0。"""
+    from tests.test_store import DOC, META      # noqa: PLC0415
+
+    with temp_db.session() as s:
+        temp_db.save_article(s, DOC, {**META, "stats": {}})               # 老文章
+        temp_db.save_article(s, DOC, {**META, "stats": {"ms": 80_000, "llm_calls": 4}})
+
+    d = client.get("/api/timing").json()
+    assert d["samples"] == 1 and d["sec_per_call"] == 20.0
+
+
+def test_用词上限各档带词汇量(client):
+    """首页那四档原先只是四个字母。数字必须现算——没下载 CEFR-J 时标尺会
+    退回内置兜底表，写死在模板里的数字就会和程序实际拦的东西对不上，
+    而这种不一致用户没法自己发现。"""
+    d = client.get("/api/levels").json()
+    assert set(d) == {"using_real_data", "cumulative"}
+    assert set(d["cumulative"]) == {"A1", "A2", "B1", "B2", "C1", "C2"}
+    c = d["cumulative"]
+    assert c["A2"] <= c["B1"] <= c["B2"] <= c["C1"], "累计值不能往回掉"
+
+
 def test_篇幅预览在词太多时给出警告(client):
     d = client.post("/api/article/plan-preview", json={"words": " ".join(
         f"word{i}" for i in range(30))}).json()

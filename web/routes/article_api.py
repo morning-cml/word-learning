@@ -16,6 +16,7 @@ from fastapi.responses import StreamingResponse
 
 import tasks
 from core import settings
+from core.lexicon import cefr
 from core.llm.client import LLM
 from core.provider import registry
 from core.provider.base import ProviderError
@@ -42,6 +43,63 @@ def _parse_words(raw: Any) -> list[str]:
                 seen.add(w)
                 out.append(w)
     return out
+
+
+@router.get("/timing")
+def timing(provider: str = "", model: str = "") -> dict:
+    """从历史文章估「一次模型调用大概多久」。
+
+    首页要在刚开始生成时就给出预计剩余时间，可那一刻还没有任何本次运行的
+    测量值。拿用户自己前几篇的实测当先验，比在代码里拍一个常数诚实得多——
+    这个数在不同模型、不同网络下能差好几倍（本机历史里 7.6 秒到 61.5 秒都有）。
+
+    取中位数不取平均：偶尔一次重试或一次超长思考会把平均值拉飞，
+    而那恰恰是「这次特别慢」而不是「平时就这么慢」。
+    """
+    # 不传就按当前生效的配置。前端不必自己先去查一遍 /api/status，
+    # 而「拿哪个模型的历史来估」这件事本来也该由服务端说了算。
+    if not provider or not model:
+        provider, model = settings.active(provider)
+
+    def per_call(article) -> float | None:
+        stats = article.stats or {}
+        ms, calls = stats.get("ms"), stats.get("llm_calls")
+        if not ms or not calls:
+            return None                     # 老文章没存过用量
+        return ms / calls / 1000
+
+    with db.session() as s:
+        rows = db.list_articles(s, limit=20)
+
+    def collect(match) -> list[float]:
+        out = [per_call(a) for a in rows if match(a)]
+        return sorted(v for v in out if v)
+
+    # 先看同一个模型；没有就退回全部。不同模型的速度差得远，
+    # 但「有个粗略的先验」仍然远好过「什么都不说」。
+    same = collect(lambda a: a.provider == provider and a.model == model)
+    scope = "model"
+    if not same:
+        same, scope = collect(lambda a: True), "all"
+    if not same:
+        return {"samples": 0, "sec_per_call": None, "scope": "none"}
+    mid = len(same) // 2
+    median = same[mid] if len(same) % 2 else (same[mid - 1] + same[mid]) / 2
+    return {"samples": len(same), "sec_per_call": round(median, 1), "scope": scope}
+
+
+@router.get("/levels")
+def levels() -> dict:
+    """用词上限各档对应多大的词汇量。
+
+    首页那个下拉框原先是四个没有含义的字母。数字现算而不是写死在模板里：
+    没下载 CEFR-J 时标尺会退回内置兜底表，写死的数字就会和程序实际拦的东西
+    对不上，而这种不一致用户没法自己发现。
+    """
+    return {
+        "using_real_data": cefr.is_real_data(),
+        "cumulative": cefr.level_counts(),
+    }
 
 
 @router.post("/article/plan-preview")

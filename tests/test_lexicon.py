@@ -140,6 +140,20 @@ def test_异干替补的词不再被改名(word):
     assert cefr.resolve(word) == word
 
 
+def test_累计词汇量是单调不减的():
+    """首页拿它给「用词上限」四档标词汇量。
+
+    「B2」是天花板不是区间——B2 以下的词当然也能用，所以显示的必须是
+    累计值。写成本级词数的话 C1 会显示得比 B2 还少（CEFR-J 里 C1 只有
+    914 个词条），读起来就成了「C1 比 B2 简单」。
+    """
+    counts = cefr.level_counts()
+    assert set(counts) == set(cefr.LEVELS)
+    values = [counts[lv] for lv in cefr.LEVELS]
+    assert values == sorted(values), "累计值不能往回掉"
+    assert values[-1] == cefr.size(), "最高一级的累计值就是整张表"
+
+
 def test_词表本身是就绪的():
     """没下载 CEFR-J 时会退回内置兜底表，功能不中断但判定粗得多。
 

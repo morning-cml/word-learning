@@ -65,6 +65,11 @@ class LLM:
             kw.setdefault(key, val)
         last: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
+            # 每一次真正发出去的请求都报一声。前端拿它算进度和剩余时间：
+            # 模型调用是这条管线里唯一实质耗时的东西（一次 30-40 秒），
+            # 而「跑到第几步」在别处都数不准——修复和补线索是条件触发的，
+            # 光看阶段事件推不出来实际发了几次请求。重试也要算，它一样在花时间。
+            self._emit("call", purpose=purpose, attempt=attempt)
             try:
                 res = self.provider.chat(messages, model=self.model, **kw)
             except ProviderError as exc:

@@ -19,13 +19,31 @@ let all = [];
 let filter = 'all';
 let query = '';
 
-/** 掌握程度画成 5 个点，比数字直观，也比进度条省地方。 */
+/** 掌握程度画成 5 格，比数字直观，也比进度条省地方。 */
 function meter(status) {
   if (status === 98) return '<span class="tag ok">已掌握</span>';
   if (status === 99) return '<span class="tag">忽略</span>';
   const dots = [1, 2, 3, 4, 5]
     .map((i) => `<i class="${i <= status ? 'on' : ''}"></i>`).join('');
-  return `<span class="meter">${dots}</span>`;
+  return `<span class="meter" title="掌握程度 ${status}/5">${dots}</span>`;
+}
+
+/** CEFR 徽章。难度是这个应用的核心维度，不该和别的标签长得一样。 */
+function level(cefr) {
+  const v = (cefr || '').toLowerCase();
+  return /^[abc][12]$/.test(v)
+    ? `<span class="lv lv-${v}">${escapeHtml(cefr)}</span>`
+    : '<span class="lv" title="不在 CEFR 词表里">—</span>';
+}
+
+/** 见过几次。多语境重复正是这个应用声称有效的机制，值得有个形状。 */
+function seen(n) {
+  const c = n || 0;
+  if (c <= 1) return `<span class="count single"><b>${c}</b></span>`;
+  const dots = Array.from({ length: Math.min(c, 5) },
+    (_, i) => `<i class="${i < 3 ? '' : 'more'}"></i>`).join('');
+  return `<span class="count" title="在 ${c} 处语境里见过"><b>${c}</b>`
+       + `<span class="dots">${dots}</span></span>`;
 }
 
 function matches(w) {
@@ -51,15 +69,13 @@ function render() {
     : '还没有词条。去生成第一篇文章。';
 
   html($('#table tbody'), rows.map((w) => `
-    <tr class="word-row" data-lemma="${escapeHtml(w.lemma)}" style="cursor:pointer">
-      <td>
-        <div class="lemma">${escapeHtml(w.lemma)}</div>
-        ${w.gloss ? `<div class="gloss">${escapeHtml(w.gloss)}</div>` : ''}
-      </td>
-      <td class="tight">${w.cefr ? `<span class="tag">${escapeHtml(w.cefr)}</span>` : '<span class="hint">—</span>'}</td>
-      <td class="num tight">${w.times_seen || 0}${(w.times_seen || 0) > 1 ? ' <span class="tag ok">多语境</span>' : ''}</td>
+    <tr class="word-row" data-lemma="${escapeHtml(w.lemma)}">
+      <td class="word-cell"><div class="lemma">${escapeHtml(w.lemma)}</div></td>
+      <td class="gloss-cell">${w.gloss ? escapeHtml(w.gloss) : '<span class="hint">还没有释义</span>'}</td>
+      <td class="tight">${level(w.cefr)}</td>
+      <td class="tight">${seen(w.times_seen)}</td>
       <td class="tight">${meter(w.status)}</td>
-      <td class="hint tight">${(w.forms || []).map(escapeHtml).join('、') || '—'}</td>
+      <td class="hint tight">${(w.forms || []).map(escapeHtml).join('、') || '<span class="faint">—</span>'}</td>
     </tr>`).join(''));
 }
 

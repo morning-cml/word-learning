@@ -12,6 +12,41 @@ function stat(value, caption, tone = '') {
   return `<div class="stat${tone ? ' ' + tone : ''}"><b>${escapeHtml(value)}</b><span>${escapeHtml(caption)}</span></div>`;
 }
 
+const STRENGTH = {
+  strong: { label: '线索充分', cls: 'ok' },
+  weak:   { label: '线索偏弱', cls: 'warn' },
+  none:   { label: '无线索',   cls: 'bad' },
+};
+
+/** CEFR 徽章。超纲词列表里带上等级，才看得出「超了多少」。 */
+function lv(level) {
+  const v = (level || '').toLowerCase();
+  return /^[abc][12]$/.test(v) ? `<span class="lv lv-${v}">${escapeHtml(level)}</span>` : '';
+}
+
+/** 逐词的线索结论。
+ *
+ * 「有 2 个词的语境线索不足」原先只是一句话——用户知道有问题，
+ * 但不知道是哪两个词，也就没法拿它们再生成一篇。这一整套管线里最贵的
+ * 那次调用（线索审计）产出的结论，到这里才算真正交到用户手上。 */
+function auditList(audits) {
+  const weak = (audits || []).filter((a) => a && a.strength !== 'strong');
+  if (!weak.length) return '';
+  const rows = weak.map((a) => {
+    const st = STRENGTH[a.strength] || STRENGTH.none;
+    return `<li>
+      <span class="aw">${escapeHtml(a.lemma || '')}</span>
+      <span class="tag ${st.cls}">${st.label}</span>
+      <span class="why">${escapeHtml(a.why || '')}</span>
+    </li>`;
+  }).join('');
+  return `<div class="audit-list">
+    <div class="section-title">这些词读完可能猜不出意思 <span class="n">${weak.length}</span></div>
+    <ul>${rows}</ul>
+    <p class="hint">拿它们再生成一篇、换个场景，比在这一篇上反复补线索有效。</p>
+  </div>`;
+}
+
 export function renderStats(el, s, targets) {
   if (!el || !s) return;
 
@@ -48,7 +83,10 @@ export function renderStats(el, s, targets) {
     blocks.push('</div>');
   }
 
-  if (cs && (cs.weak || cs.none)) {
+  // 有逐词结论就直接列出来；没有（老文章）才退回那句概括
+  const detail = auditList(s.audits);
+  if (detail) blocks.push(detail);
+  else if (cs && (cs.weak || cs.none)) {
     blocks.push(`<div class="note warn" style="margin-top:14px">
       有 ${cs.weak + cs.none} 个词的语境线索不足——这些词读完可能猜不出意思。
       建议之后用它们再生成一篇，换个场景。
@@ -64,9 +102,9 @@ export function renderStats(el, s, targets) {
 
   if (s.offenders?.length) {
     const list = s.offenders.slice(0, 10)
-      .map((o) => escapeHtml(o.surface) + (o.level ? `(${escapeHtml(o.level)})` : ''))
-      .join('、');
-    blocks.push(`<div class="hint" style="margin-top:12px">文中仍有超纲词：${list}</div>`);
+      .map((o) => `<span class="offender">${escapeHtml(o.surface)}${lv(o.level)}</span>`)
+      .join('');
+    blocks.push(`<div class="offenders"><span class="hint">文中仍有超纲词</span>${list}</div>`);
   }
 
   if (s.using_real_cefr === false) {

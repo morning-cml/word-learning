@@ -214,6 +214,12 @@ export class Reader {
 
 /* ------------------------------ 词条面板 ------------------------------ */
 
+/** CEFR 徽章。难度是这个应用的核心维度，不该和「见过 N 次」长得一样。 */
+function lvBadge(cefr) {
+  const v = (cefr || '').toLowerCase();
+  return /^[abc][12]$/.test(v) ? `<span class="lv lv-${v}">${escapeHtml(cefr)}</span>` : '';
+}
+
 const STRENGTH = {
   strong: { label: '线索充分', cls: 'ok' },
   weak:   { label: '线索偏弱', cls: 'warn' },
@@ -282,9 +288,10 @@ export class WordPanel {
 
     const contexts = ctxs.map((c) => {
       const st = STRENGTH[c.clue_strength] || null;
+      const tone = st ? ' ctx-' + st.cls : '';
       const en = escapeHtml(c.en).replace(
         new RegExp(`\\b${escapeRe(c.surface || w.lemma)}\\b`, 'i'), (m) => `<b>${m}</b>`);
-      return `<div class="ctx">
+      return `<div class="ctx${tone}">
         <div class="ctx-head">
           <a href="/read/${c.article_id}">${escapeHtml(c.article_title || '未命名')}</a>
           ${st ? `<span class="tag ${st.cls}">${st.label}</span>` : ''}
@@ -299,7 +306,7 @@ export class WordPanel {
       <button class="panel-close" title="关闭 (Esc)">×</button>
       <div class="panel-word">
         <h2>${escapeHtml(w.lemma)}</h2>
-        ${w.cefr ? `<span class="tag">${escapeHtml(w.cefr)}</span>` : ''}
+        ${lvBadge(w.cefr)}
         <span class="tag">见过 ${Number(w.times_seen) || 0} 次</span>
         ${w.distinct_articles > 1
           ? `<span class="tag ok">${Number(w.distinct_articles)} 篇不同文章</span>` : ''}

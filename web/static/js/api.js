@@ -65,6 +65,8 @@ export async function tryGet(path, fallback = null) {
    按后端路由分组。加接口就在对应的组里加一行。 */
 
 export const status = () => get('/api/status');
+export const levels = () => get('/api/levels');
+export const timing = () => get('/api/timing');
 
 export const article = {
   preview:  (words)        => post('/api/article/plan-preview', { words }),

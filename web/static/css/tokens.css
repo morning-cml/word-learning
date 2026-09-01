@@ -21,10 +21,10 @@
 
 :root {
   /* ---- 表面：页面 < 卡片，靠明度差分层 ---- */
-  --bg:            #eeeae1;   /* 页面底 */
-  --surface:       #faf8f4;   /* 卡片 / 阅读面 */
-  --surface-2:     #e7e2d7;   /* 次级填充：输入框、chip、代码块 */
-  --surface-sunken:#e2ddd1;   /* 凹陷：日志、表头 */
+  --bg:            #e6e0d4;   /* 页面底 */
+  --surface:       #faf8f3;   /* 卡片 / 阅读面 */
+  --surface-2:     #ece6da;   /* 次级填充：输入框、chip、代码块 */
+  --surface-sunken:#ddd6c7;   /* 凹陷：日志、表头 */
 
   /* ---- 文字：三级足够，再多就分不清了 ---- */
   --text:   #22201c;
@@ -38,7 +38,7 @@
   --accent:      #a8481a;   /* 文字 / 描边 */
   --accent-fill: #a8481a;   /* 填充底，配白字 */
   --accent-hover:#8c3a13;
-  --accent-soft: #f6e4d5;   /* 目标词高亮、选中态的浅底 */
+  --accent-soft: #f6e4d5;   /* 选中态、句子悬停的浅底（目标词另有 --target） */
   --on-accent:   #ffffff;
 
   /* ---- 语义色：同样分文字/填充两套 ---- */
@@ -52,8 +52,32 @@
   --bad-fill:  #a03328;
   --bad-soft:  #f5dedb;
 
+  /* ---- CEFR 六级色阶 ----------------------------------------------------
+     难度是这个应用的核心数据维度（整把标尺都建在它上面），却一直被渲染成
+     六个一模一样的灰药丸——等于把已经算出来的信息又扔了。
+     排成 绿→青→蓝→紫→橙→红 的递进，扫一眼就能看出一批词的难度构成，
+     不用逐个读字母。色相顺序是刻意的：色相环上单向推进，不会出现
+     「B1 看着比 C1 难」这种视觉倒挂。 */
+  --lv-a1: #2f7d4f;  --lv-a1-soft: #dcecdf;
+  --lv-a2: #1a7d78;  --lv-a2-soft: #d7ebe9;
+  --lv-b1: #2f6bb0;  --lv-b1-soft: #dbe6f4;
+  --lv-b2: #6b4fa8;  --lv-b2-soft: #e5dff3;
+  --lv-c1: #a8641a;  --lv-c1-soft: #f5e6d3;
+  --lv-c2: #a33526;  --lv-c2-soft: #f6dedb;
+  --lv-none:#8c877c; --lv-none-soft:#e7e2d7;
+
+  /* ---- 目标词 ----------------------------------------------------------
+     单开一套色而不是复用 --bad：红色在这个应用里已经有「出错 / 无线索 / 删除」
+     的含义，而目标词是这一页的主角，不是坏消息。两者在同一屏里都会出现
+     （词条面板：无线索的语境 + 高亮的那个词），共用一个变量以后就再也分不开了。
+     深浅两套的诉求相反——浅底上要压得够深才不刺眼，暗底上要提亮才看得清。 */
+  --target:      #c0271c;
+  --target-soft: #f6d3ce;
+
   --shadow:   0 1px 2px rgba(60, 50, 35, .05), 0 4px 14px rgba(60, 50, 35, .07);
   --shadow-lg:0 8px 34px rgba(60, 50, 35, .16);
+  /* 悬停抬起时用，比静止态更实一点，才有「浮起来」的感觉 */
+  --shadow-hover: 0 2px 6px rgba(60, 50, 35, .08), 0 10px 26px rgba(60, 50, 35, .13);
 
   --radius:    12px;
   --radius-sm: 8px;
@@ -74,7 +98,10 @@
      必须是绝对长度：写成 40em 的话，em 相对各元素自身字号，
      19px 的正文算出 760px、15px 的卡片算出 600px，同一栏的两块会对不齐。 */
   --measure: 760px;
-  --page-max: 1180px;
+  /* 列表页要铺开：宽屏上 1180 之外那一大片空白不是留白，是没用上的屏幕。
+     阅读页仍旧收在 --measure，那里窄才是对的（一行 66 字符最好读）。 */
+  --page-max: 1440px;
+  --page-narrow: 900px;
   --topbar-h: 56px;
 
   --ease: cubic-bezier(.4, 0, .2, 1);
@@ -83,17 +110,17 @@
 /* 深色：没手动切过时跟随系统 */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg:            #15141a;
-    --surface:       #1d1c23;
-    --surface-2:     #26252e;
-    --surface-sunken:#121118;
+    --bg:            #0f0e13;
+    --surface:       #1b1a22;
+    --surface-2:     #262433;
+    --surface-sunken:#09080c;
 
     --text:   #eae7f0;
     --muted:  #a09bad;
     --faint:  #726d80;
 
-    --line:      #322f3b;
-    --line-soft: #292630;
+    --line:      #383445;
+    --line-soft: #2a2735;
 
     /* 暗底上品牌色要提亮才看得清，但按钮底反而要压暗才配得住白字 */
     --accent:      #ef9a63;
@@ -114,22 +141,35 @@
 
     --shadow:    0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .35);
     --shadow-lg: 0 10px 38px rgba(0, 0, 0, .5);
+
+    /* 暗底上色阶要提亮，soft 底则压到几乎只剩一点色相——
+       深色模式里「浅色底 + 深色字」整个反过来，直接沿用浅色那套会糊成一片。 */
+    --lv-a1: #63c98d;  --lv-a1-soft: #17301f;
+    --lv-a2: #46c3bb;  --lv-a2-soft: #12302e;
+    --lv-b1: #6fa8e8;  --lv-b1-soft: #16263a;
+    --lv-b2: #a98ce0;  --lv-b2-soft: #241d38;
+    --lv-c1: #e0a057;  --lv-c1-soft: #33240f;
+    --lv-c2: #ec7a6e;  --lv-c2-soft: #331c19;
+    --lv-none:#726d80; --lv-none-soft:#242231;
+    --target:      #ff8878;
+    --target-soft: #45211d;
+    --shadow-hover: 0 2px 8px rgba(0, 0, 0, .4), 0 14px 34px rgba(0, 0, 0, .5);
   }
 }
 
 /* 手动切到深色：与上面那块保持同一份数值 */
 :root[data-theme="dark"] {
-  --bg:            #15141a;
-  --surface:       #1d1c23;
-  --surface-2:     #26252e;
-  --surface-sunken:#121118;
+  --bg:            #0f0e13;
+  --surface:       #1b1a22;
+  --surface-2:     #262433;
+  --surface-sunken:#09080c;
 
   --text:   #eae7f0;
   --muted:  #a09bad;
   --faint:  #726d80;
 
-  --line:      #322f3b;
-  --line-soft: #292630;
+  --line:      #383445;
+  --line-soft: #2a2735;
 
   --accent:      #ef9a63;
   --accent-fill: #a24e21;
@@ -149,4 +189,17 @@
 
   --shadow:    0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .35);
   --shadow-lg: 0 10px 38px rgba(0, 0, 0, .5);
+
+  /* 暗底上色阶要提亮，soft 底则压到几乎只剩一点色相——
+     深色模式里「浅色底 + 深色字」整个反过来，直接沿用浅色那套会糊成一片。 */
+  --lv-a1: #63c98d;  --lv-a1-soft: #17301f;
+  --lv-a2: #46c3bb;  --lv-a2-soft: #12302e;
+  --lv-b1: #6fa8e8;  --lv-b1-soft: #16263a;
+  --lv-b2: #a98ce0;  --lv-b2-soft: #241d38;
+  --lv-c1: #e0a057;  --lv-c1-soft: #33240f;
+  --lv-c2: #ec7a6e;  --lv-c2-soft: #331c19;
+  --lv-none:#726d80; --lv-none-soft:#242231;
+  --target:      #ff8878;
+  --target-soft: #45211d;
+  --shadow-hover: 0 2px 8px rgba(0, 0, 0, .4), 0 14px 34px rgba(0, 0, 0, .5);
 }

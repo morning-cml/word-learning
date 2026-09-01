@@ -16,18 +16,25 @@ w.HTMLElement.prototype.scrollIntoView = () => {};
 // 一次真实生成会 yield 的事件序列（含一次修复和一次重试，故意不走顺风路径）
 const EVENTS = [
   { type:'phase', phase:'plan', message:'正在为 5 个词选题，规划 2 段' },
+  { type:'call', purpose:'structured', attempt:1 },
   { type:'plan', topic:'深夜电台', genre:'短篇小说', title_en:'The Wrong Number',
     title_zh:'打错的电话', reason:'这批词有共同的情绪场', paragraphs:2 },
   { type:'phase', phase:'write', index:1, total:2, message:'第 1/2 段：abandon、silence' },
+  { type:'call', purpose:'creative', attempt:1 },
   { type:'retry', attempt:1, reason:'空响应：思考用了 3110 tokens，只剩 0 给正文' },
+  { type:'call', purpose:'creative', attempt:2 },
   { type:'phase', phase:'repair', index:1, message:'第 1 段校验未过（too_hard），第 1 次修复' },
+  { type:'call', purpose:'structured', attempt:1 },
   { type:'phase', phase:'audit', index:1, message:'第 1 段：审查 2 个词的语境线索' },
+  { type:'call', purpose:'structured', attempt:1 },
   { type:'paragraph', index:1, paragraph:{ sentences:[{},{}],
     audits:[{lemma:'abandon',strength:'strong'},{lemma:'silence',strength:'strong'}] } },
   { type:'phase', phase:'write', index:2, total:2, message:'第 2/2 段：confess、hesitate、fragile' },
+  { type:'call', purpose:'creative', attempt:1 },
   { type:'paragraph', index:2, paragraph:{ sentences:[{}],
     audits:[{lemma:'confess',strength:'weak'}] } },
   { type:'phase', phase:'glossary', message:'生成中文释义' },
+  { type:'call', purpose:'structured', attempt:1 },
   { type:'done', document:{ title_en:'The Wrong Number' }, stats:{
       clue_strength:{strong:4,weak:1,none:0}, targets_hit:4, targets_total:5,
       targets_missed:['fragile'], unplaced:['fragile'], offender_rate:0.012,
@@ -57,6 +64,11 @@ w.fetch = async (url, opts = {}) => {
       words:['abandon','silence','confess','hesitate','fragile'], count:5,
       paragraphs:2, estimated_words:170, warning:'' }) };
   if (p === '/api/article/generate') return { ok:true, status:200, body: sseBody(EVENTS) };
+  if (p === '/api/timing') return { ok:true, status:200, json: async () => ({
+    samples:3, sec_per_call:36.1, scope:'model' }) };
+  if (p === '/api/levels') return { ok:true, status:200, json: async () => ({
+    using_real_data: true,
+    cumulative: { A1:1064, A2:2307, B1:4446, B2:6863, C1:7777, C2:8653 } }) };
   return { ok:true, status:200, json: async () => ({}) };
 };
 globalThis.fetch = w.fetch;
@@ -67,6 +79,24 @@ await mod.init({});
 doc.querySelector('#words').value = 'abandon silence confess hesitate fragile';
 doc.querySelector('#go').dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
 await new Promise(r => setTimeout(r, 300));
+
+/* ---- 用词上限说明：既是文档也是控件 ---- */
+console.log('用词上限说明');
+const levelRows = [...doc.querySelectorAll('#levels li')];
+check('四档都列出来了', levelRows.length === 4, `${levelRows.length} 行`);
+check('词汇量是从接口拉的累计值，不是写死的',
+      levelRows.map(r => r.querySelector('.lv-n').textContent).join('|') === '2,307 词|4,446 词|6,863 词|7,777 词',
+      levelRows.map(r => r.querySelector('.lv-n').textContent).join('|'));
+check('默认选中的那一档高亮', doc.querySelector('#levels li.on')?.dataset.level === 'B2');
+check('例词用等宽字体列出', levelRows.every(r => r.querySelector('.ex')?.textContent.trim()));
+
+//  点一行要真的切档：两处显示同一个状态却各说各话，比只有下拉框还糟
+levelRows[1].dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+check('点一行就切到那一档', doc.querySelector('#level').value === 'B1');
+check('高亮跟着走且唯一',
+      doc.querySelectorAll('#levels li.on').length === 1
+      && doc.querySelector('#levels li.on').dataset.level === 'B1');
+doc.querySelector('#levels li[data-level="B2"]').dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
 
 const steps = [...doc.querySelectorAll('#timeline .step')];
 const text = doc.querySelector('#timeline').textContent;
@@ -89,5 +119,59 @@ check('用时与调用数写进 meta', /\d+ 秒 · 6 次模型调用 · 24310 to
       doc.querySelector('#progressMeta').textContent);
 check('成功 toast', [...doc.querySelectorAll('#toasts .toast')].some(t => t.textContent === '生成完成'));
 
-console.log(`\n${ok}/${ok+fail} 通过`);
+/* ---- 进度条 ----
+   它给的是「还要不要接着等」的依据，所以两件事不能出错：
+   跑完之前不能显示满格（撒谎），跑完之后必须是满格（看着像卡住了）。 */
+console.log('\n进度条');
+const fill = doc.querySelector('#progressFill');
+check('跑完是满格', fill.style.width === '100%', fill.style.width);
+check('跑完标成完成态', fill.className.includes('done'), fill.className);
+check('跑完不再显示剩余时间', doc.querySelector('#progressEta').textContent === '');
+
+/* ---- 进度条的算术 ----
+   上面验的是终态，这里验中间态。用假时钟推着走，因为真实一次调用要 30-40 秒，
+   而条子在这几十秒里怎么动，恰恰是「看着像不像卡住了」的全部。 */
+console.log('\n进度条的算术');
+{
+  const el = () => ({ style: {}, className: '', textContent: '' });
+  const fill = el(), stage = el(), eta = el();
+  const pg = new mod.Progress({ fill, stage, eta });
+
+  let now = 0;
+  const realNow = Date.now;
+  Date.now = () => now;
+
+  const pct = () => parseFloat(fill.style.width);
+  const seen = [];
+  const step = (sec) => { now += sec * 1000; pg.render(); seen.push(pct()); };
+
+  pg.reset(2, 36.1);                       // 2 段 → 顺风 6 次调用；历史 36.1 秒/次
+  check('刚开始是 0', pct() === 0, fill.style.width);
+  check('有历史就能立刻给出剩余时间', /预计还需/.test(eta.textContent), eta.textContent);
+
+  pg.onCall();                             // 第 1 次调用开始
+  step(18); step(18);                      // 飞行途中条子也要走
+  check('调用途中条子在往前走', seen[0] > 0 && seen[1] > seen[0], seen.join(' → '));
+
+  pg.onCall();                             // 第 1 次完成、第 2 次开始
+  check('完成一次后至少走到 1/6', pct() >= 100 / 6 - 0.5, fill.style.width);
+
+  //  模拟修复 + 补线索：实际调用数超出顺风预估
+  for (let i = 0; i < 10; i++) { step(30); pg.onCall(); }
+  check('超出预估时不撒谎，封顶 98%', pct() <= 98, fill.style.width);
+  check('一路只涨不退', seen.every((v, i) => i === 0 || v >= seen[i - 1]), seen.join(' → '));
+
+  pg.finish();
+  check('结束才允许满格', pct() === 100 && fill.className.includes('done'));
+
+  //  没有历史、也还没测到任何一次：宁可不说
+  const p2 = new mod.Progress({ fill: el(), stage: el(), eta: (globalThis.__e = el()) });
+  p2.reset(2, null);
+  check('没有先验时不编一个时间出来',
+        !/预计还需/.test(globalThis.__e.textContent), globalThis.__e.textContent);
+
+  Date.now = realNow;
+}
+
+console.log(`\n${ok}/${ok + fail} 通过`);
 process.exit(fail ? 1 : 0);

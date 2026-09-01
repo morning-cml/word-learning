@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block body %}
-<main class="wrap narrow">
+<main class="wrap">
 
   <div class="page-head">
     <h1>把单词写成一篇文章</h1>
@@ -11,45 +11,155 @@
     </p>
   </div>
 
-  <div class="card">
-    <label class="field" for="words">目标词（换行、逗号或空格分隔都行）</label>
-    <textarea id="words" spellcheck="false"
-              placeholder="abandon&#10;silence&#10;confess&#10;hesitate&#10;fragile"></textarea>
-    <div class="hint" id="preview" style="margin-top:10px"></div>
+  {# 两栏：左边是要干的事，右边是「它在干什么」和「以前干过什么」。
+     原先整页只有一张输入卡，宽屏上四分之三是空的——空白不等于克制，
+     它只是没把屏幕用上，而且让人不知道生成期间会发生什么。 #}
+  <div class="split">
+    <div class="split-main">
 
-    <div class="row" style="margin-top:20px">
-      <div>
-        <label class="field" for="level">除目标词外的用词上限</label>
-        <select id="level" style="width:auto">
-          <option value="A2">A2 · 入门</option>
-          <option value="B1">B1 · 中级</option>
-          <option value="B2" selected>B2 · 中高级</option>
-          <option value="C1">C1 · 高级</option>
-        </select>
+      <div class="card">
+        <label class="field" for="words">目标词（换行、逗号或空格分隔都行）</label>
+        <textarea id="words" spellcheck="false"
+                  placeholder="abandon&#10;silence&#10;confess&#10;hesitate&#10;fragile"></textarea>
+        <div class="hint" id="preview"></div>
+
+        {# 第一次打开时输入框是空的，而「该填什么」并不显然——
+           占位符里那五个词看着像提示，其实没法点。给两组能直接用的。 #}
+        <div class="presets" id="presets">
+          <span class="hint">没想好填什么？</span>
+          <button class="chip" type="button" data-fill="reluctant threshold vivid deliberate coincide">
+            B1–B2 一组</button>
+          <button class="chip" type="button" data-fill="meticulous tedious ambiguous scrutiny resilient nostalgia">
+            B2–C1 一组</button>
+        </div>
+
+        <div class="row form-actions">
+          <div>
+            <label class="field" for="level">除目标词外的用词上限</label>
+            <select id="level">
+              <option value="A2">A2 · 入门</option>
+              <option value="B1">B1 · 中级</option>
+              <option value="B2" selected>B2 · 中高级</option>
+              <option value="C1">C1 · 高级</option>
+            </select>
+          </div>
+          <span class="spacer"></span>
+          <button id="stop" type="button" hidden>停止</button>
+          <button class="btn-primary" id="go" type="button">开始生成</button>
+        </div>
       </div>
-      <span class="spacer"></span>
-      <button id="stop" type="button" hidden>停止</button>
-      <button class="btn-primary" id="go" type="button">开始生成</button>
-    </div>
-  </div>
 
-  {# 生成过程：一篇要跑 4-9 次模型调用、一两分钟，必须让人看见在干什么 #}
-  <div class="card" id="progressCard" hidden>
-    <div class="card-head">
-      <h2>生成过程</h2>
-      <span class="spacer"></span>
-      <span class="hint" id="progressMeta"></span>
-    </div>
-    <div class="timeline" id="timeline"></div>
-  </div>
+      {# 那个下拉框原先是四个没有含义的字母。这一档决定了整篇文章除目标词外
+         能用多难的词，是这一页第二重要的选择，却完全没有解释。
+         等级说明用 CEFR 官方描述；例词逐个对着 data/cefr.csv 核过，
+         都确实落在该级；词汇量由 /api/levels 现算，不写死。 #}
+      <div class="card" id="levelGuide">
+        <div class="section-title">用词上限选哪一档</div>
+        <p class="guide-lead">
+          这一档管的是<b>除目标词以外</b>的所有词。它不是「你的水平」，
+          而是「你不查词典就能读下去的水平」——目标词本身已经是生词，
+          其余的词必须是你认得的，<b>语境线索才推得出词义</b>。
+          所以按自评水平<b>往低选一档</b>：句子里再多一个不认识的词，那一处线索就废了。
+        </p>
 
-  <div class="card" id="resultCard" hidden>
-    <div class="card-head">
-      <h2>生成结果</h2>
-      <span class="spacer"></span>
-      <a class="btn btn-primary btn-sm" id="openReader" href="#">打开阅读器</a>
+        <ul class="levels" id="levels">
+          <li data-level="A2">
+            <span class="lv lv-a2">A2</span>
+            <div class="lv-body">
+              <b>入门</b>
+              <span class="d">能读懂与切身相关的常用表达：个人信息、购物、周围环境。</span>
+              <span class="ex">village · audience · shout · childhood</span>
+            </div>
+            <span class="lv-n" data-count="A2"></span>
+          </li>
+          <li data-level="B1">
+            <span class="lv lv-b1">B1</span>
+            <div class="lv-body">
+              <b>中级</b>
+              <span class="d">能读懂日常话题的连贯文字，能跟上一段经历或事件的叙述。</span>
+              <span class="ex">proceed · deposit · fluent · remarkable</span>
+            </div>
+            <span class="lv-n" data-count="B1"></span>
+          </li>
+          <li data-level="B2" class="rec">
+            <span class="lv lv-b2">B2</span>
+            <div class="lv-body">
+              <b>中高级 <span class="pick">推荐</span></b>
+              <span class="d">能读懂具体和抽象主题的复杂文本；一般的新闻和小说不吃力。</span>
+              <span class="ex">stability · nuisance · contradict · replacement</span>
+            </div>
+            <span class="lv-n" data-count="B2"></span>
+          </li>
+          <li data-level="C1">
+            <span class="lv lv-c1">C1</span>
+            <div class="lv-body">
+              <b>高级</b>
+              <span class="d">能读懂长而有难度的文本，抓得住字面之外的意思。</span>
+              <span class="ex">obscure · prolific · bribery · unwavering</span>
+            </div>
+            <span class="lv-n" data-count="C1"></span>
+          </li>
+        </ul>
+
+        <p class="hint" id="levelNote">
+          点一行就切到那一档。数字是该档<b>及以下</b>的累计词汇量——
+          上限是天花板，比它简单的词当然也能用。
+        </p>
+      </div>
+
+      {# 生成过程：一篇要跑 4-9 次模型调用、一两分钟，必须让人看见在干什么 #}
+      <div class="card" id="progressCard" hidden>
+        <div class="card-head">
+          <h2>生成过程</h2>
+          <span class="spacer"></span>
+          <span class="hint" id="progressMeta"></span>
+        </div>
+        {# 进度条 + 剩余时间。时间线能说明「在干什么」，但答不了
+           「还要多久」——而那才是决定「等一下还是先去干别的」的那个信息。 #}
+        <div class="progress">
+          <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-legend">
+            <span id="progressStage">正在连接模型…</span>
+            <span class="spacer"></span>
+            <span id="progressEta"></span>
+          </div>
+        </div>
+
+        <div class="timeline" id="timeline"></div>
+      </div>
+
+      <div class="card" id="resultCard" hidden>
+        <div class="card-head">
+          <h2>生成结果</h2>
+          <span class="spacer"></span>
+          <a class="btn btn-primary btn-sm" id="openReader" href="#">打开阅读器</a>
+        </div>
+        <div id="stats"></div>
+      </div>
+
     </div>
-    <div id="stats"></div>
+
+    <aside class="split-side">
+
+      {# 这四步不是装饰。生成要花一两分钟，不说清楚在干什么，等待就变成怀疑；
+         而且「线索审计」这一步正是本产品和「让 AI 造几个例句」的分界线。 #}
+      <div class="card">
+        <div class="section-title">它会做四件事</div>
+        <ol class="flow">
+          <li><b>选题</b><span>通读词表找语义交集，挑一个能自然容纳这批词的题材，而不是硬凑</span></li>
+          <li><b>按段写</b><span>一段一次调用，出问题只重写那一段，不用整篇重来</span></li>
+          <li><b>校验</b><span>目标词到没到、中英对不对得上、有没有超出用词上限</span></li>
+          <li class="key"><b>线索审计</b><span>扮演不认识这些词的读者，逐个判断能不能从上下文猜出词义——猜不出就回去补</span></li>
+        </ol>
+      </div>
+
+      <div class="card" id="recentCard" hidden>
+        <div class="section-title">最近生成 <span class="n" id="recentN"></span></div>
+        <div class="recent" id="recent"></div>
+        <a class="hint" href="/library">看全部 →</a>
+      </div>
+
+    </aside>
   </div>
 
 </main>

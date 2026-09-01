@@ -3,6 +3,30 @@
 import { $, on, html, escapeHtml, fmtTime, toast } from '../core.js';
 import * as api from '../api.js';
 
+function lvBadge(level) {
+  const v = (level || '').toLowerCase();
+  return /^[abc][12]$/.test(v) ? `<span class="lv lv-${v}">${escapeHtml(level)}</span>` : '';
+}
+
+/** 线索比画成分段条。
+ *
+ * 「N 个目标词里有几个语境线索充分」是这个产品唯一的价值指标，
+ * 原先它是一个裸的 "3/5"，和旁边的「178 词」看起来一样重，
+ * 扫一列根本分不出哪几篇是白读的。
+ *
+ * 老文章没存过这个字段，要和「测过、但一格都不达标」区分开——
+ * 画成全空会读成后者，而那是两件完全不同的事。 */
+function clueBar(clue) {
+  const m = /^(\d+)\/(\d+)$/.exec(clue || '');
+  if (!m) return '<span class="clue-none" title="这篇生成时还没有线索审计">—</span>';
+  const strong = +m[1], total = +m[2];
+  const segs = Array.from({ length: total },
+    (_, i) => `<i class="${i < strong ? 'on' : 'miss'}"></i>`).join('');
+  return `<span class="clue-bar${strong === total ? ' full' : ''}"`
+       + ` title="${total} 个目标词里 ${strong} 个语境线索充分">`
+       + `<span class="clue-seg">${segs}</span><b>${strong}/${total}</b></span>`;
+}
+
 function row(a) {
   const words = (a.target_words || []);
   const chips = words.slice(0, 6).map((w) => `<span class="chip">${escapeHtml(w)}</span>`).join('')
@@ -11,13 +35,13 @@ function row(a) {
     <td>
       <a href="/read/${a.id}">${escapeHtml(a.title_en || '（无标题）')}</a>
       <div class="hint">${escapeHtml(a.title_zh || '')}${a.genre ? ' · ' + escapeHtml(a.genre) : ''}</div>
-      <div class="hint" style="font-size:12px">${escapeHtml(fmtTime(a.created_at))}</div>
+      <div class="row-meta">${lvBadge(a.level)}<span class="row-time">${escapeHtml(fmtTime(a.created_at))}</span></div>
     </td>
     <td><div class="chips">${chips}</div></td>
-    <td class="num tight">${a.word_count || 0} 词<div class="hint">${escapeHtml(a.level)}</div></td>
-    <td class="num tight">${a.clue || '—'}</td>
+    <td class="num tight">${a.word_count || 0} 词</td>
+    <td class="tight">${clueBar(a.clue)}</td>
     <td class="hint tight">${escapeHtml(a.model)}</td>
-    <td class="tight"><button class="btn-sm btn-danger del" type="button">删除</button></td>
+    <td class="tight"><button class="btn-sm btn-danger del row-act" type="button">删除</button></td>
   </tr>`;
 }
 

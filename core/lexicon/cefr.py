@@ -130,6 +130,28 @@ def resolve(word: str) -> str:
     return cands[1] if len(cands) > 1 else cands[0]
 
 
+def level_counts() -> dict[str, int]:
+    """每一级「及以下」的累计词数。
+
+    界面上要回答的是「选 B2 意味着文章能用多大的词汇量」，那是累计值而不是
+    本级词数——用词上限是个天花板，B2 以下的词当然也能用。
+
+    数字必须现算，不能写死在模板里：没下载 CEFR-J 时词表会退回内置兜底表，
+    那张表只有两千来个词且全标 A1，此时写死的数字会和程序实际执行的标尺
+    对不上——而「界面说的」和「实际拦的」不一致，正是用户没法自己发现的那类错。
+    调用方拿 is_real_data() 决定要不要显示这些数字。
+    """
+    table = _load()[0]
+    per: dict[str, int] = dict.fromkeys(LEVELS, 0)
+    for level in table.values():
+        per[level] += 1
+    out, running = {}, 0
+    for level in LEVELS:
+        running += per[level]
+        out[level] = running
+    return out
+
+
 def within(word: str, max_level: str) -> bool:
     """该词是否在 max_level 及以下。查不到等级一律视为超纲。"""
     lv = level_of(word)

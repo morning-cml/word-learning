@@ -64,20 +64,27 @@ article.doc h1 {
 
 /* ------------------------------ 目标词 ------------------------------ */
 
+/* 目标词。原先只有一条 --accent-soft 的底色带，而那个值在深色下是 #3b2a1c，
+   压在 #1b1a22 的阅读面上几乎看不出来——「哪几个是要学的词」得逐行去找。
+   现在直接给字上色：正文里唯一一处彩色文字，扫一眼就能定位。
+   底色带留着但换成同色系并压淡，只作为「这是被标记过的」的次要信号。 */
 .tw { position: relative; cursor: pointer; border-radius: 2px; }
 .tw .tw-word {
-  background: linear-gradient(transparent 62%, var(--accent-soft) 62%);
-  font-weight: 600; padding: 0 1px;
+  color: var(--target); font-weight: 700; padding: 0 1px;
+  background: linear-gradient(transparent 62%, var(--target-soft) 62%);
 }
 .tw .tw-blank { display: none; }
-.tw:hover .tw-word { background: var(--accent-soft); }
-.doc.hide-marks .tw .tw-word { background: none; font-weight: inherit; }
+.tw:hover .tw-word { background: var(--target-soft); }
+/* 「高亮：关」要连字色一起关掉，否则关了个寂寞 */
+.doc.hide-marks .tw .tw-word { background: none; font-weight: inherit; color: inherit; }
 
 /* 回忆模式：挖空，逼你先检索再验证 */
 .doc.mode-cloze .tw .tw-word { display: none; }
 .doc.mode-cloze .tw .tw-blank {
   display: inline-block; font-family: var(--mono); font-weight: 700;
-  color: var(--accent); background: var(--accent-soft);
+  /* 和揭示后的词同色：挖空和它底下的答案是同一个东西，
+     换个颜色会让人以为「揭示」这个动作改变了什么 */
+  color: var(--target); background: var(--target-soft);
   border-radius: 3px; padding: 0 2px; letter-spacing: -.04em;
 }
 .doc.mode-cloze .tw:hover .tw-blank { filter: brightness(.94); }
@@ -85,8 +92,8 @@ article.doc h1 {
 .doc.mode-cloze .tw.revealed .tw-blank { display: none; }
 .doc.mode-cloze .tw.just-revealed .tw-word { animation: pop .7s var(--ease); }
 @keyframes pop {
-  0%   { background: var(--accent); color: var(--on-accent); border-radius: 3px; }
-  100% { background: linear-gradient(transparent 62%, var(--accent-soft) 62%); }
+  0%   { background: var(--target); color: var(--on-accent); border-radius: 3px; }
+  100% { background: linear-gradient(transparent 62%, var(--target-soft) 62%); }
 }
 
 /* ------------------------------ 词条面板 ------------------------------ */
@@ -123,11 +130,22 @@ article.doc h1 {
 .panel-label .hint { display: block; text-transform: none; letter-spacing: 0; margin-top: 4px; font-size: 12px; }
 .status-row { display: flex; flex-wrap: wrap; gap: 6px; }
 
-.ctx { padding: var(--sp-3) 0; border-top: 1px solid var(--line-soft); }
+/* 每处语境按当时的线索审计结论着色。
+   面板里最该一眼看出来的不是「这个词出现过几次」，而是「哪几处是真能
+   帮你记住的」——那正是这个产品声称在做的事。原先只有一个小标签，
+   和旁边的文章名一样重，扫过去分不出来。 */
+.ctx {
+  padding: var(--sp-3); margin-bottom: var(--sp-2);
+  border-radius: var(--radius-sm); background: var(--surface-2);
+  border-left: 3px solid var(--line);
+}
+.ctx-ok   { border-left-color: var(--ok); }
+.ctx-warn { border-left-color: var(--warn); }
+.ctx-bad  { border-left-color: var(--bad); }
 .ctx-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 4px; }
 .ctx-head a { font-size: 12px; color: var(--muted); }
 .ctx-en { font-family: var(--serif); font-size: 15px; line-height: 1.6; }
-.ctx-en b { color: var(--accent); }
+.ctx-en b { color: var(--target); }
 .ctx-zh { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .ctx-clue {
   font-size: 12.5px; color: var(--ok); margin-top: 6px;
