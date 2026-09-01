@@ -46,9 +46,16 @@ def test_声明了人名就能无条件检测句首词():
 
     Ubiquitous 不在 CEFR-J 词表里，单看一个 token 和人名分不开；
     但 plan 声明了 names 之后就不用分了。
+
+    断言写成「包含 / 不包含」而不是精确集合：没下载 CEFR-J 时会退回内置兜底表，
+    那张表只有两千来个高频词，screens 之类会被多判成超纲。
+    多判几个不影响这条要验的主张，写死集合反而让测试依赖运行环境
+    ——CI 上就是没有词表的。
     """
     text = "Meticulous work matters. Nora walked home. Ubiquitous screens filled Riverton."
-    assert offenders(text, names={"Nora", "Riverton"}) == {"Meticulous", "Ubiquitous"}
+    got = offenders(text, names={"Nora", "Riverton"})
+    assert {"Meticulous", "Ubiquitous"} <= got, "句首生词必须被检出"
+    assert not ({"Nora", "Riverton"} & got), "声明过的人名不该被判成超纲词"
 
 
 def test_没声明人名时靠句中大写兜底():
