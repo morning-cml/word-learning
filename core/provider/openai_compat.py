@@ -31,6 +31,31 @@ class OpenAICompatProvider:
     def _url(self, path: str) -> str:
         return f"{self.spec.base_url.rstrip('/')}/{path.lstrip('/')}"
 
+    def _body(self, r: httpx.Response) -> dict[str, Any]:
+        """把响应体读成 dict，读不出来就翻译成 ProviderError。
+
+        这个类对外的约定是「任何失败都变成一个带上下文的 ProviderError」，
+        设置页才有人话可显示。`r.json()` 是这条约定上唯一的漏洞：base_url
+        指到了网页、代理或另一种协议上时，拿回来的常常是一个 200 的 HTML 页，
+        抛出的 ValueError 不在任何调用方的捕获范围里，一路冒到接口层就是
+        HTTP 500——而这恰好发生在四层检验、也就是专门用来诊断这类配置错误
+        的那个页面上。
+        """
+        try:
+            data = r.json()
+        except ValueError as exc:
+            raise ProviderError(
+                f"{self.spec.base_url} 返回的不是 JSON（HTTP {r.status_code}）"
+                "——检查 base_url 是不是指到了网页或代理上",
+                status=r.status_code, body=r.text[:500],
+            ) from exc
+        if not isinstance(data, dict):
+            raise ProviderError(
+                f"{self.spec.base_url} 返回的 JSON 顶层不是对象",
+                status=r.status_code, body=r.text[:500],
+            )
+        return data
+
     # ------------------------------------------------------------------- API
 
     def list_models(self) -> list[str]:
@@ -45,8 +70,8 @@ class OpenAICompatProvider:
             raise ProviderError(
                 self._explain(r.status_code), status=r.status_code, body=r.text[:500]
             )
-        data = r.json().get("data") or []
-        return [m.get("id", "") for m in data if m.get("id")]
+        models = self._body(r).get("data") or []
+        return [m.get("id", "") for m in models if isinstance(m, dict) and m.get("id")]
 
     def chat(
         self,
@@ -89,16 +114,19 @@ class OpenAICompatProvider:
                 self._explain(r.status_code), status=r.status_code, body=r.text[:800]
             )
 
-        data = r.json()
+        data = self._body(r)
         choices = data.get("choices") or []
         text, finish = "", ""
-        if choices:
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
             text = (choices[0].get("message") or {}).get("content") or ""
             finish = choices[0].get("finish_reason") or ""
 
+        usage = data.get("usage")
         return ChatResult(
-            text=text, model=data.get("model", model), ms=ms,
-            usage=data.get("usage") or {}, raw=data, finish_reason=finish,
+            text=text if isinstance(text, str) else "",
+            model=data.get("model") or model, ms=ms,
+            usage=usage if isinstance(usage, dict) else {},
+            raw=data, finish_reason=finish if isinstance(finish, str) else "",
         )
 
     # --------------------------------------------------------------- 错误翻译
