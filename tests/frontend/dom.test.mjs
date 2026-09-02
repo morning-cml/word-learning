@@ -320,9 +320,17 @@ console.log('\n9. 悬停浮层与专注模式');
   check('不立刻弹（鼠标扫过一行会经过好几个词）', !shown());
   await settle(500);
   check('停留够久才弹', shown());
-  check('浮层给了释义和等级',
-        /abandon/.test(tip().textContent) && !!tip().querySelector('.lv'),
-        tip().textContent.replace(/\s+/g, ' ').trim().slice(0, 40));
+  //  等级徽章只在词条真有 CEFR 等级时才渲染，而那取决于机器上有没有下载
+  //  CEFR-J（CI 上没有，退回兜底表后 abandon 查不到等级）。断言写成
+  //  「有数据时才要求它出现」，而不是写死一个只在本机成立的值——
+  //  这正是 需要注意.md 第 17 条那个坑，第一版就踩进去了，CI 抓出来的。
+  const hasCefr = !!detail.cefr;
+  check('浮层给了词、释义和见过次数（有等级数据时还给徽章）',
+        /abandon/.test(tip().textContent)
+        && /抛弃/.test(tip().textContent)
+        && /见过 2 次/.test(tip().textContent)
+        && (!hasCefr || !!tip().querySelector('.lv')),
+        tip().textContent.replace(/\s+/g, ' ').trim().slice(0, 44));
   check('浮层挂在 body 上，不在正文里',
         tip().parentElement === ctx.doc.body,
         tip().parentElement?.tagName);
