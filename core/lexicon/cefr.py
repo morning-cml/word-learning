@@ -11,7 +11,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from .lemma import lemma_candidates, tokenize_spans
+from .lemma import lemma_candidates, same_word, tokenize_spans
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 CEFR_CSV = DATA_DIR / "cefr.csv"
@@ -168,7 +168,8 @@ def scan(text: str, max_level: str, *, allow: set[str] | None = None,
     names  传选题阶段声明的人名 / 地名。有了它就不用再猜句首那个大写词
            到底是专有名词还是生词——生成的时候本来就知道，别把信息扔了再猜。
     """
-    allow_lemmas = {resolve(w) for w in (allow or set())}
+    targets = [w.strip() for w in (allow or set()) if w and w.strip()]
+    allow_lemmas = {resolve(w) for w in targets}
     declared = {n.lower() for n in (names or set())}
     spans = tokenize_spans(text)
     # 句中出现的大写词是专有名词的独立证据，不依赖模型报得全不全
@@ -202,6 +203,26 @@ def scan(text: str, max_level: str, *, allow: set[str] | None = None,
         if base in allow_lemmas:
             continue
         if within(tok, max_level):
+            continue
+        # 到这里这个词就要被判成超纲了。判之前必须再问一次：它是不是某个
+        # 目标词的另一种形态？
+        #
+        # 上面那条「还原后相等」的快路只在两边能碰头时成立，而**目标词的派生
+        # 形式自己就是词表词条**时它碰不了头：resolve("abandoned") 得到的是
+        # abandoned（B2 词条）而不是 abandon，allow 里那个 abandon 永远等不到。
+        # 词表里这样的组合有 983 对，其中 496 对派生形式的等级比原形更高
+        # ——也就是恰好会顶破用词上限的那些。
+        #
+        # 后果不是「少判一个词」这么轻：check_paragraph 会据此判 too_hard，
+        # 拿修复预算去要求模型「把 abandoned 换成 B2 以内的说法」，
+        # 即花钱让它删掉这篇文章的目标词本身；stats 里还会把目标词列进
+        # 「文中仍有超纲词」。而这一切用户都看不出来。
+        #
+        # same_word 是这个项目对「这是不是同一个词的另一种形态」的既定判据，
+        # _appears 判「目标词出现了没有」用的就是它。两边共用一个判据，
+        # 才不会一边说「出现了」一边说「超纲了」。它只在本来就要报错的
+        # 分支上跑，顺风路径零开销。
+        if any(same_word(w, tok) for w in targets):
             continue
         item = offenders.setdefault(
             base, {"lemma": base, "surface": tok, "level": level_of(tok), "count": 0}

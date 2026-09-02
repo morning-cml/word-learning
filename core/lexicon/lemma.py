@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+from .irregular_forms import GENERATED as _GENERATED
+
 WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
 
 # 高频不规则形式，规则法搞不定的部分。
@@ -25,7 +27,7 @@ WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
 # left 既是 leave 的过去式，也是「左」；rose 既是 rise 的过去式，也是花。
 # 不看词性分不开，而这里没有词性。保留归并是因为它们绝大多数时候
 # 确实是过去式；真被并错了，用户看到的是标题不对，数据本身没坏。
-IRREGULAR: dict[str, str] = {
+_CURATED: dict[str, str] = {
     "am": "be", "is": "be", "are": "be", "was": "be", "were": "be", "been": "be", "being": "be",
     "has": "have", "had": "have", "having": "have",
     "does": "do", "did": "do", "done": "do", "doing": "do",
@@ -48,6 +50,17 @@ IRREGULAR: dict[str, str] = {
     "children": "child", "men": "man", "women": "woman",
     "feet": "foot", "teeth": "tooth", "mice": "mouse", "geese": "goose", "lives": "life",
 }
+
+# 手写表 + 生成表。**手写表优先**，因为两张表装的不是一类东西：
+# 上面那张编码的是「决策」（better 不并、people 不并，理由见注释）；
+# irregular_forms.py 装的是「事实」——规则法推不出、而且并过去不会藏起
+# 别的词的那些形态（arose / awoke / analyses）。决策不能被事实覆盖，
+# 所以生成表在前、手写表在后。
+#
+# 生成表的筛选判据写在 scripts/gen_irregular.py 里，那里也解释了为什么
+# 是「宁可漏收，不可错收」：漏收一条只是偶尔多烧一次修复调用，
+# 错收一条会把错的词当成 surface 写进 Encounter，而那是不可再生的。
+IRREGULAR: dict[str, str] = {**_GENERATED, **_CURATED}
 
 _VOWELS = set("aeiou")
 
@@ -79,7 +92,13 @@ def _suffix_candidates(w: str) -> list[str]:
     if len(w) > 4 and w.endswith("ied"):
         push(w[:-3] + "y")
     for suf in ("ing", "ed"):
-        if len(w) > len(suf) + 2 and w.endswith(suf):
+        # 门槛是「去掉后缀还剩得下两个字母」，不是三个。要求三个的话，
+        # used / aged / owed / tied（4 字母）和 using / going / dying（5 字母）
+        # 一个都还原不了——而这些是英语里最常见的一批词形。
+        # 后果不是「少认一个变形」：目标词 go 写成 going 时，same_word 说它
+        # 不是同一个词，于是超纲检测把 going 判成超纲词，修复指令要求模型
+        # 「把 going 换成 B2 以内的说法」。整条链子不报错。
+        if len(w) > len(suf) + 1 and w.endswith(suf):
             stem = w[: -len(suf)]
             # 末尾叠辅音说明触发了「双写辅音」规则，去重后的形式才是原形
             if len(stem) > 2 and stem[-1] == stem[-2] and stem[-1] not in _VOWELS:

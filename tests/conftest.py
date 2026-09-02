@@ -130,3 +130,21 @@ def run_pipeline(llm, words=("abandon", "silence"), level="B2"):
         if event["type"] == "done":
             doc, stats = event["document"], event["stats"]
     return doc, stats, events
+
+
+@pytest.fixture
+def cefr_table(monkeypatch):
+    """把 CEFR 词表换成一张测试自己给的小表。
+
+    有些判定只在词表长成某个样子时才走得到，最要紧的一种是
+    **目标词的派生形式自己也是一个词条、而且等级比原形更高**
+    （真词表里这样的组合有 983 对，其中 496 对更难）。
+    直接依赖 data/cefr.csv 的话，这类测试在没下载词表的机器上（CI 就是）
+    会因为退回内置兜底表而悄悄走到另一条分支上——看着过了，其实没测到。
+    """
+    from core.lexicon import cefr
+
+    def apply(table: dict[str, str]) -> None:
+        monkeypatch.setattr(cefr, "_load", lambda: (dict(table), True))
+
+    return apply

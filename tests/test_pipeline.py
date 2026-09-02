@@ -201,3 +201,42 @@ def test_补线索把机械校验搞坏就丢弃(fake_llm, happy_responses):
 @pytest.mark.parametrize("n,expect_paras", [(0, 2), (1, 2), (3, 2), (8, 3), (18, 6), (40, 6)])
 def test_篇幅规划(n, expect_paras):
     assert sizing(n)[0] == expect_paras
+
+
+# ------------------------------------------------- 修复预算不能花在目标词身上
+
+def test_不会拿修复预算去删掉目标词本身(cefr_table):
+    """目标词写进文章时长的是屈折形态（abandon → abandoned），
+    管线自己的 prompt 样例就是这么写的。而 `abandoned` 在 CEFR-J 里是一个
+    独立词条、等级还更高，于是超纲检测认不出它就是目标词。
+
+    后果是一条完整的因果链，每一环都不报错：
+      判 too_hard → 烧一次修复调用 → 修复指令写着「把这些词换成 CEFR B1
+      以内的说法：abandoned、reluctantly」→ 模型照做，把目标词换掉 →
+      下一轮校验又报「目标词 abandon 没有在本段出现」→ 两条指令互相打架，
+      MAX_REPAIRS 全烧光 → 交出一篇目标词被改没了的文章，
+      而用户看到的是「生成完成」。
+
+    OFFENDER_FLOOR 是 1，所以要两个词才顶得破——真实段落里有三个目标词，
+    这条链子在实际运行时比这个最小复现更容易触发。
+    """
+    cefr_table({
+        "the": "A1", "mill": "A1", "was": "A1", "after": "A1", "flood": "A1",
+        "he": "A1", "spoke": "A1", "about": "A1", "it": "A1",
+        "abandon": "B1", "abandoned": "B2",        # -ed 分词自己也是词条
+        "reluctant": "B2", "reluctantly": "C1",    # -ly 副词自己也是词条
+    })
+    para = {"sentences": [
+        {"en": "The mill was abandoned after the flood.",
+         "zh": "洪水之后工厂就废弃了。",
+         "targets": [{"lemma": "abandon", "surface": "abandoned"}]},
+        {"en": "He spoke reluctantly about it.",
+         "zh": "他很不情愿地提起这件事。",
+         "targets": [{"lemma": "reluctant", "surface": "reluctantly"}]},
+    ]}
+
+    problems = ArticleTask().check_paragraph(
+        para, ["abandon", "reluctant"], "B1",
+        allow={"abandon", "reluctant"}, names=set())
+
+    assert problems == [], [p.as_instruction() for p in problems]
