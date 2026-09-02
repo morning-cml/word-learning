@@ -2,6 +2,9 @@ name: 测试
 
 # 推 main 或开 PR 时跑。两个作业互相独立：
 # Python 那份覆盖管线、词表、存储、接口；前端那份在 jsdom 里跑真实页面和模块。
+# action 都钉在 v7：v4/v5 那几个的运行时是 Node 20，GitHub 已经在强制降级到
+# Node 24 上跑并打告警，迟早变成硬错误。node-version 一并从 20 提到 24——
+# Node 20 已经 EOL，而且本机开发用的就是 24，CI 和本地跑同一个版本才验得准。
 on:
   push:
     branches: [main]
@@ -13,9 +16,9 @@ jobs:
     name: Python
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -30,16 +33,16 @@ jobs:
     name: 前端（jsdom）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
 
       # 夹具是拿真实的 FastAPI 应用渲染出来的，所以这边也要装 Python 依赖
       - name: 安装依赖
