@@ -116,3 +116,74 @@ def test_状态码翻译成人话(respond, status, keyword):
         _chat()
     assert keyword in str(err.value)
     assert err.value.status == status
+
+
+# ------------------------------------------------- 能力按模型声明，不是按厂商
+
+RAW = {
+    "label": "X", "base_url": "https://x/v1",
+    "models": [
+        {"id": "reasoner"},
+        {"id": "plain",
+         "capabilities": {"json_schema": True},
+         "reasoning": {"counts_toward_max_tokens": False, "headroom": 0,
+                       "disable": {}, "disable_for": []},
+         "temperatures": {"creative": 0.7}},
+    ],
+    "capabilities": {"json_object": True, "json_schema": False},
+    "reasoning": {"counts_toward_max_tokens": True, "headroom": 12000,
+                  "disable": {"thinking": {"type": "disabled"}}, "disable_for": ["probe"]},
+    "temperatures": {"creative": 1.5, "probe": 0.0},
+}
+
+
+def _spec():
+    from core.provider.registry import _spec_from_dict
+
+    return _spec_from_dict("x", RAW)
+
+
+def test_没单独声明的模型拿厂商那一份():
+    """绝大多数模型没有 overrides，这条路径每次调用都会走到，
+    所以它必须是零成本的——直接返回同一个对象，不是每次造一份新的。"""
+    spec = _spec()
+    assert spec.for_model("reasoner") is spec
+    assert spec.for_model("从没听说过的模型") is spec
+
+
+def test_模型级声明覆盖厂商级():
+    """同一家的模型能力不一样。本仓库自己就有裂缝：deepseek 段落下三个模型
+    共用一份 reasoning.disable，换一个不认识 thinking 参数的模型，
+    探针就会发一个它不认识的字段，回来是一个含糊的 400。"""
+    plain = _spec().for_model("plain")
+    assert plain.capabilities.json_schema is True
+    assert plain.reasoning.budget(3000) == 3000, "不该再追加思考预算"
+    assert plain.reasoning.params_for("probe") == {}, "不该再发 thinking 参数"
+
+
+def test_只覆盖写出来的那几个键():
+    """浅合并：模型段里没写的键仍然继承厂商的，
+    否则每加一个模型级 override 都要把整段抄一遍，抄漏了没人会发现。"""
+    plain = _spec().for_model("plain")
+    assert plain.capabilities.json_object is True, "厂商声明的 json_object 该留着"
+    assert plain.temperature_for("creative") == 0.7, "模型自己写了的要生效"
+    assert plain.temperature_for("probe") == 0.0, "模型没写的要继承厂商的"
+    assert plain.base_url == "https://x/v1" and plain.label == "X"
+
+
+def test_变体不再嵌套():
+    """解析一层就够。变体自己再带 per_model 的话，for_model 会一路递归下去，
+    而这个链条没有任何地方限制得住深度。"""
+    assert _spec().for_model("plain").per_model == {}
+
+
+def test_真实配置里每个模型都解析得出来():
+    """providers.yaml 改坏了（比如某个模型段缩进错位）要在这里挂，
+    而不是等用户选到那个模型时才在生成中途炸。"""
+    from core.provider import registry
+
+    for pid, spec in registry.load_specs().items():
+        for model in spec.models:
+            resolved = spec.for_model(model.id)
+            assert resolved.base_url == spec.base_url, f"{pid}/{model.id}"
+            assert isinstance(resolved.reasoning.budget(1000), int)

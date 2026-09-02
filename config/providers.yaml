@@ -108,6 +108,32 @@ providers:
       structured: 0.6
       probe: 0.0
 
+  # ---------------------------------------------------------------------------
+  # 能力也可以按**单个模型**声明，覆盖上面厂商级的那几段。
+  #
+  # 为什么需要这个：把 capabilities / quirks / reasoning 挂在厂商上，等于假设
+  # 同一家的模型能力一样——这个假设站不住。上面 deepseek 段落里三个模型共用
+  # 一份 reasoning.disable，换一个不认识 thinking 参数的模型，探针就会发一个
+  # 它不认识的字段，回来是 400，而错误文案只能含糊地说「可能是该模型不支持
+  # 某个参数」。LiteLLM 管着 2500+ 个模型，它的能力标志全是挂在模型上的。
+  #
+  # 只写要改的键，没写的继承厂商那一份：
+  #
+  #     models:
+  #       - id: some-non-reasoning-model
+  #         label: 不是推理模型
+  #         capabilities: { json_schema: true }        # 这一家默认 false，它支持
+  #         reasoning:                                  # 不是推理模型，整段关掉
+  #           counts_toward_max_tokens: false
+  #           headroom: 0
+  #           disable: {}
+  #           disable_for: []
+  #         temperatures: { creative: 0.7 }             # probe 等没写的仍继承
+  #
+  # 注意 reasoning.disable 是**整段替换**而不是逐键合并——「关思考要传哪些
+  # 参数」是一整套，混着两家的写法拼出来的东西谁也没验过。
+  # ---------------------------------------------------------------------------
+
   # ---- 下面是扩展示例，填上 key 即可启用 ----
   # openai_compatible:
   #   label: 自定义（任意 OpenAI 兼容端点）

@@ -62,7 +62,9 @@ def _step(name: str, label: str) -> dict[str, Any]:
 
 def check(provider_id: str, model: str, api_key: str) -> dict[str, Any]:
     """跑完三层检验，任何一层失败都不影响后面几层的结果结构。"""
-    spec = registry.get_spec(provider_id)
+    # 按模型解析：同一家的模型能力不一样，而检验的全部意义就是
+    # 「**这个**模型能不能干这个活」，拿厂商的声明去验等于验了个别的东西
+    spec = registry.get_spec(provider_id).for_model(model)
     provider = registry.build(provider_id, api_key, timeout=90.0)
     llm = LLM(provider=provider, model=model, max_retries=1)
 

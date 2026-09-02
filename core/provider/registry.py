@@ -12,10 +12,34 @@ from .openai_compat import OpenAICompatProvider
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "providers.yaml"
 
 
-def _spec_from_dict(pid: str, raw: dict) -> ProviderSpec:
+def _merge(base: dict, over: dict) -> dict:
+    """模型级声明覆盖厂商级，只覆盖写出来的那几个键。
+
+    浅合并就够：capabilities / quirks / reasoning 三段都是一层扁平的键值，
+    唯一的例外是 reasoning.disable（一个 dict），而它整段替换才有意义——
+    「关思考要传哪些参数」是一整套，混着两家的写法拼出来的东西谁也没验过。
+    """
+    return {**base, **over}
+
+
+def _spec_from_dict(pid: str, raw: dict, *, _model_overrides: bool = True) -> ProviderSpec:
     caps = raw.get("capabilities") or {}
     quirks = raw.get("quirks") or {}
     reasoning = raw.get("reasoning") or {}
+
+    per_model: dict[str, ProviderSpec] = {}
+    if _model_overrides:
+        for m in raw.get("models") or []:
+            over = {k: m[k] for k in ("capabilities", "quirks", "reasoning", "temperatures")
+                    if k in m}
+            if not over:
+                continue
+            merged = dict(raw)
+            for key in over:
+                merged[key] = _merge(raw.get(key) or {}, over[key] or {})
+            # 变体自己不再带 per_model：解析一层就够，避免 for_model 递归下去
+            per_model[m["id"]] = _spec_from_dict(pid, merged, _model_overrides=False)
+
     return ProviderSpec(
         id=pid,
         label=raw.get("label", pid),
@@ -42,6 +66,7 @@ def _spec_from_dict(pid: str, raw: dict) -> ProviderSpec:
         temperatures=dict(raw.get("temperatures") or {}),
         key_url=raw.get("key_url", ""),
         docs=raw.get("docs", ""),
+        per_model=per_model,
     )
 
 

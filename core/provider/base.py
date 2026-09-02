@@ -74,12 +74,29 @@ class ProviderSpec:
     temperatures: dict[str, float] = field(default_factory=dict)
     key_url: str = ""
     docs: str = ""
+    # 声明了 overrides 的那几个模型，各自一份合并好的 spec（见 for_model）
+    per_model: dict[str, ProviderSpec] = field(default_factory=dict)
 
     def temperature_for(self, purpose: str, fallback: float = 1.0) -> float:
         return float(self.temperatures.get(purpose, fallback))
 
     def default_model(self) -> str:
         return self.models[0].id if self.models else ""
+
+    def for_model(self, model: str) -> ProviderSpec:
+        """按模型解析能力声明。没有单独声明的模型拿厂商这一份。
+
+        能力挂在厂商上是个隐含假设：同一家的模型能力一样。这个假设站不住——
+        LiteLLM 管着 2500+ 个模型，它的 supports_response_schema 这类标志
+        全是挂在**模型**上的。本仓库自己就能看到裂缝：deepseek 段落下的三个
+        模型共用一份 reasoning.headroom 和 disable: {thinking: ...}，
+        换一个不认识 thinking 参数的模型，探针就会发一个它不认识的字段，
+        回来是 400，而错误文案只能含糊地说「可能是该模型不支持某个参数」。
+
+        返回 self 而不是每次都造一个新对象：绝大多数模型没有 overrides，
+        这条路径在每次调用上都会走到。
+        """
+        return self.per_model.get(model, self)
 
 
 @dataclass

@@ -84,6 +84,9 @@ class OpenAICompatProvider:
         json_schema: dict | None = None,
         **options: Any,
     ) -> ChatResult:
+        # 能力按**这次要用的模型**解析，不是按厂商。同一家的模型能力不一样，
+        # 拿厂商的声明去发请求，差异会以一个含糊的 400 冒出来。
+        spec = self.spec.for_model(model)
         payload: dict[str, Any] = {"model": model, "messages": list(messages)}
         if temperature is not None:
             payload["temperature"] = temperature
@@ -91,9 +94,9 @@ class OpenAICompatProvider:
             # DeepSeek 文档特别警告：max_tokens 不足会让 JSON 中途截断
             payload["max_tokens"] = max_tokens
 
-        if json_schema and self.spec.capabilities.json_schema:
+        if json_schema and spec.capabilities.json_schema:
             payload["response_format"] = {"type": "json_schema", "json_schema": json_schema}
-        elif json_mode and self.spec.capabilities.json_object:
+        elif json_mode and spec.capabilities.json_object:
             payload["response_format"] = {"type": "json_object"}
 
         # Kimi 的 thinking 之类参数在官方 SDK 里必须走 extra_body，但 extra_body

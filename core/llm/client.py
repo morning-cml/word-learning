@@ -49,13 +49,22 @@ class LLM:
         if self.on_event:
             self.on_event(kind, data)
 
+    @property
+    def spec(self):
+        """按当前模型解析出来的那份声明。
+
+        能力 / quirks / 思考预算都可能因模型而异（见 ProviderSpec.for_model），
+        所以这一层一律走它，不直接摸 provider.spec。
+        """
+        return self.provider.spec.for_model(self.model)
+
     def temperature(self, purpose: str) -> float:
-        return self.provider.spec.temperature_for(purpose)
+        return self.spec.temperature_for(purpose)
 
     # ------------------------------------------------------------------- API
 
     def chat(self, messages: list[dict], *, purpose: str = "structured", **kw) -> ChatResult:
-        spec = self.provider.spec
+        spec = self.spec
         kw.setdefault("temperature", self.temperature(purpose))
         # 推理模型：max_tokens 含思考 token，必须额外留出思考预算，
         # 否则思考一多就把正文挤成空字符串。
@@ -94,7 +103,7 @@ class LLM:
         **kw,
     ) -> Any:
         """要求模型返回 JSON，并保证解析成功或抛出可读错误。"""
-        quirks = self.provider.spec.quirks
+        quirks = self.spec.quirks
         msgs = [dict(m) for m in messages]
         if quirks.json_needs_keyword and msgs:
             msgs[-1]["content"] = msgs[-1]["content"] + JSON_KEYWORD_HINT
