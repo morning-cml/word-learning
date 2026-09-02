@@ -372,7 +372,7 @@ pytest                          # Python 298 项
 cd tests/frontend
 npm install
 python make_fixtures.py
-npm test                        # 前端 92 项
+npm test                        # 前端 107 项
 ```
 
 测试全部离线：涉及模型的用 `FakeLLM`，返回什么由测试自己决定。真去调模型

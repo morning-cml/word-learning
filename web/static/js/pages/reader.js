@@ -8,7 +8,7 @@
 
 import { $, $$, toast } from '../core.js';
 import * as api from '../api.js';
-import { Reader, WordPanel, MODE_HINTS } from '../components/reader.js';
+import { Reader, WordPanel, WordTip, MODE_HINTS } from '../components/reader.js';
 import { renderStats } from '../components/stats.js';
 
 export async function init({ articleId }) {
@@ -67,6 +67,41 @@ export async function init({ articleId }) {
   });
 
 
+
+  /* 悬停浮层：只想瞄一眼释义时，不必开那个 430px 的面板。
+     两条 suppress 规则缺一不可——回忆模式下没揭示的词给了就等于直接把答案
+     摆出来，整个模式就废了；面板已经开着时再弹一个浮层是两套 UI 打架。 */
+  const tip = new WordTip($('#doc'), {
+    load: (lemma) => api.words.detail(lemma),
+    suppress: (el) =>
+      (reader.mode === 'cloze' && !el.classList.contains('revealed'))
+      || $('#panel').classList.contains('open'),
+  });
+
+  /* 专注模式：收起顶栏。导航在读的时候用不上，却占着固定的 56px。
+     状态存 localStorage——「我读书时要不要看见导航」是个稳定偏好，
+     每开一篇文章重设一次很烦。 */
+  const FOCUS_KEY = 'wl-reader-focus';
+  let focusOn = false;
+  function setFocus(on, persist = true) {
+    focusOn = on;
+    document.body.classList.toggle('focus-mode', on);
+    $('#focus').setAttribute('aria-pressed', String(on));
+    $('#focus').textContent = on ? '退出专注' : '专注';
+    if (persist) {
+      try { localStorage.setItem(FOCUS_KEY, on ? '1' : '0'); }
+      catch (err) { /* 隐私模式下写不了，本次会话内仍然生效 */ }
+    }
+    // 顶栏一收，整页内容会往上跳一截，浮层却钉在旧坐标上
+    tip.hide();
+    // 可用宽度没变但视口高度变了，锁着的段落高度要重算
+    reader.lockHeights();
+  }
+  let savedFocus = null;
+  try { savedFocus = localStorage.getItem(FOCUS_KEY); } catch (err) { /* 默认关 */ }
+  setFocus(savedFocus === '1', false);
+  $('#focus').addEventListener('click', () => setFocus(!focusOn));
+
   /* 排版控件。字号和栏宽写进 :root 的 CSS 变量，reader.css 那边用
      var(--reader-size, 默认值) 接住——所以没设过的人看到的和以前一模一样。
 
@@ -101,6 +136,7 @@ export async function init({ articleId }) {
       try { localStorage.setItem(typoKey(name), String(typoIndex[name])); }
       catch (err) { /* 隐私模式下写不了，本次会话内仍然生效 */ }
     }
+    tip.hide();          // 字号一变，浮层底下的那个词就不在原地了
     reader.lockHeights();
   }
 
@@ -144,6 +180,8 @@ export async function init({ articleId }) {
     // 而且控制台之外没有任何迹象。
     if (e.target.matches?.('input, textarea') || e.metaKey || e.ctrlKey) return;
     if (e.code === 'Space') { e.preventDefault(); setMode(reader.mode === 'en' ? 'zh' : 'en'); }
+    // F 不和别的键冲突，面板开着也照样能按——它管的是整页的取景，不是某个词
+    else if (e.key === 'f' || e.key === 'F') setFocus(!focusOn);
     // 面板开着时数字键归「改掌握程度」管（见 components/reader.js 的 HOTKEYS）。
     // 显式让路，不靠两个 document 监听器的注册顺序——那种依赖谁先挂上的写法，
     // 哪天有人调换两行 new 的位置就会静默失效。

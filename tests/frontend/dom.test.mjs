@@ -287,5 +287,94 @@ console.log('\n8. 阅读器：掌握程度热键与排版控件');
         rootStyle());
 }
 
+
+/* ============================ 悬停浮层与专注模式 ============================
+   浮层的定位（在词上方 / 不跑出视口）用 puppeteer 量了，jsdom 没有布局引擎。
+   这里验它验得了的：事件流、缓存、以及那两条「什么时候**不能**显示」的规则。 */
+console.log('\n9. 悬停浮层与专注模式');
+{
+  const detail = API[`/api/words/${API.__lemma__}`];
+  let wordFetches = 0;
+  const ctx = boot('reader', {
+    routes: { '/api/articles/1': API['/api/articles/1'] },
+    onFetch: (p, opts) => {
+      if (p.endsWith('/status')) return { ok: true, status: 200, json: async () => ({}) };
+      if (p.startsWith('/api/words/')) {
+        wordFetches += 1;
+        return { ok: true, status: 200, json: async () => detail };
+      }
+      return undefined;
+    },
+  });
+  const mod = await import(JS('pages/reader.js'));
+  await mod.init({ articleId: '1' });
+
+  const tw = () => qa(ctx, '.tw')[0];
+  const tip = () => ctx.doc.querySelector('.tw-tip');
+  const mouse = (el, type) => el.dispatchEvent(new ctx.w.MouseEvent(type, { bubbles: true }));
+  const shown = () => !!tip() && tip().classList.contains('show');
+  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  mouse(tw(), 'mouseover');
+  await settle(80);
+  check('不立刻弹（鼠标扫过一行会经过好几个词）', !shown());
+  await settle(500);
+  check('停留够久才弹', shown());
+  check('浮层给了释义和等级',
+        /abandon/.test(tip().textContent) && !!tip().querySelector('.lv'),
+        tip().textContent.replace(/\s+/g, ' ').trim().slice(0, 40));
+  check('浮层挂在 body 上，不在正文里',
+        tip().parentElement === ctx.doc.body,
+        tip().parentElement?.tagName);
+
+  mouse(tw(), 'mouseout');
+  await settle(60);
+  check('移开就收起', !shown());
+
+  const before = wordFetches;
+  mouse(tw(), 'mouseover'); await settle(500);
+  mouse(tw(), 'mouseout');  await settle(60);
+  mouse(tw(), 'mouseover'); await settle(500);
+  check('同一个词只查一次接口', wordFetches === before,
+        `又发了 ${wordFetches - before} 次`);
+
+  // 点开面板时浮层要走：点击不触发 mouseout，不管的话两套 UI 会同屏
+  mouse(tw(), 'click');
+  await settle(60);
+  check('点击后浮层收起', !shown());
+  ctx.doc.dispatchEvent(new ctx.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await settle(60);
+
+  /* ---- 回忆模式：没揭示的词绝不能给 ---- */
+  ctx.doc.dispatchEvent(new ctx.w.KeyboardEvent('keydown',
+    { key: '4', code: 'Digit4', bubbles: true }));
+  await settle(60);
+  check('已切到回忆模式', q(ctx, '#doc').className.includes('mode-cloze'));
+  mouse(tw(), 'mouseover');
+  await settle(500);
+  check('没揭示的词不给浮层（给了等于把答案摆出来）', !shown());
+  mouse(tw(), 'mouseout'); await settle(60);
+  tw().classList.add('revealed');
+  mouse(tw(), 'mouseover');
+  await settle(500);
+  check('揭示之后才给', shown());
+  mouse(tw(), 'mouseout'); await settle(60);
+
+  /* ---- 专注模式 ---- */
+  const btn = q(ctx, '#focus');
+  check('默认不在专注模式', !ctx.doc.body.classList.contains('focus-mode'));
+  ctx.doc.dispatchEvent(new ctx.w.KeyboardEvent('keydown', { key: 'f', bubbles: true }));
+  await settle(60);
+  check('按 F 进入专注模式', ctx.doc.body.classList.contains('focus-mode'));
+  check('按钮同步成「退出专注」并标了 aria-pressed',
+        btn.textContent.trim() === '退出专注' && btn.getAttribute('aria-pressed') === 'true',
+        `${btn.textContent.trim()} / ${btn.getAttribute('aria-pressed')}`);
+  check('存进 localStorage', ctx.w.localStorage.getItem('wl-reader-focus') === '1');
+  btn.dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  await settle(60);
+  check('点按钮退出', !ctx.doc.body.classList.contains('focus-mode')
+        && ctx.w.localStorage.getItem('wl-reader-focus') === '0');
+}
+
 console.log(`\n${ok}/${ok + fail} 通过`);
 process.exit(fail ? 1 : 0);

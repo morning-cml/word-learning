@@ -238,6 +238,127 @@ export const STATUSES = [
   [98, '已掌握'], [99, '忽略'],
 ];
 
+/* ------------------------------ 悬停浮层 ------------------------------ */
+
+/** 悬停在目标词上先给一个小浮层：释义、等级、见过几次。点了才开完整面板。
+ *
+ * 借自 Lute 的 TermPopup。要解决的是「只想瞄一眼」和「开一个 430px 的面板」
+ * 之间的落差——后者要视线横跨屏幕，看完还得关掉。
+ *
+ * 两处必须守住的：
+ *   · 回忆模式下，没揭示的词不能给（浮层直接把答案摆出来，整个模式就废了）；
+ *   · 同一个词只查一次接口，结果缓存住。一段文章里同一个目标词会出现多次，
+ *     每次悬停都发一次请求的话，鼠标扫过一行就是十几个请求。
+ */
+export class WordTip {
+  /** @param {(lemma:string)=>Promise<object>} load 取词条详情
+   *  @param {(el:HTMLElement)=>boolean} suppress 返回 true 就不显示 */
+  constructor(root, { load, suppress } = {}) {
+    this.root = root;
+    this.load = load;
+    this.suppress = suppress || (() => false);
+    this.cache = new Map();
+    this.el = null;
+    this.timer = null;
+    this.token = 0;              // 每次 show 递增，用来丢弃过期的接口回包
+
+    // 用 mouseover / mouseout 而不是 mouseenter / mouseleave：
+    // 前者会冒泡，一个监听器就能覆盖动态渲染出来的所有目标词。
+    root.addEventListener('mouseover', (e) => {
+      const tw = e.target.closest('.tw');
+      if (tw) this.schedule(tw);
+    });
+    root.addEventListener('mouseout', (e) => {
+      if (e.target.closest('.tw')) this.hide();
+    });
+    // 键盘的人也要看得到：.tw 本来就有 tabindex，Tab 过去就给，不用等
+    root.addEventListener('focusin', (e) => {
+      const tw = e.target.closest('.tw');
+      if (tw) this.show(tw);
+    });
+    root.addEventListener('focusout', () => this.hide());
+    // 点开面板时浮层要走。点击不会触发 mouseout（鼠标没动），
+    // 不管的话浮层就赖在词条面板旁边，两套 UI 同屏说同一件事。
+    root.addEventListener('click', () => this.hide());
+    // 滚动之后浮层还钉在旧坐标上，那是页面上唯一一个不跟着内容走的东西
+    window.addEventListener('scroll', () => this.hide(), { passive: true });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.hide(); });
+  }
+
+  schedule(tw) {
+    clearTimeout(this.timer);
+    // 等一下再弹：鼠标扫过一行会经过好几个目标词，立刻弹就是一串闪光
+    this.timer = setTimeout(() => this.show(tw), 260);
+  }
+
+  hide() {
+    clearTimeout(this.timer);
+    this.token += 1;                       // 让还在飞的那次请求作废
+    if (this.el) this.el.classList.remove('show');
+  }
+
+  async show(tw) {
+    const lemma = tw.dataset.lemma;
+    if (!lemma || this.suppress(tw)) return;
+    const token = ++this.token;
+
+    let data = this.cache.get(lemma);
+    if (data === undefined) {
+      try {
+        data = await this.load(lemma);
+      } catch (err) {
+        data = null;                       // 查不到就记住，别一直重试
+      }
+      this.cache.set(lemma, data);
+    }
+    // 等接口回来的这段时间里鼠标可能已经移开、或者移到了另一个词上
+    if (token !== this.token || !data) return;
+
+    this.render(data);
+    this.place(tw);
+    this.el.classList.add('show');
+  }
+
+  render(w) {
+    if (!this.el) {
+      this.el = document.createElement('div');
+      this.el.className = 'tw-tip';
+      this.el.setAttribute('role', 'tooltip');
+      document.body.appendChild(this.el);
+    }
+    const seen = Number(w.times_seen) || 0;
+    const arts = Number(w.distinct_articles) || 0;
+    this.el.innerHTML = `
+      <div class="tw-tip-head">
+        <span class="tw-tip-word">${escapeHtml(w.lemma)}</span>
+        ${lvBadge(w.cefr)}
+      </div>
+      ${w.gloss ? `<div class="tw-tip-gloss">${escapeHtml(w.gloss)}</div>`
+                : '<div class="tw-tip-gloss faint">还没有释义</div>'}
+      <div class="tw-tip-meta">见过 ${seen} 次${arts > 1 ? ` · ${arts} 篇不同文章` : ''}</div>
+      <div class="tw-tip-hint">点一下看全部语境</div>`;
+  }
+
+  /** 钉在词的上方；上面放不下就翻到下面。左右夹住，不让它跑出视口。 */
+  place(tw) {
+    const GAP = 8;
+    const MARGIN = 8;
+    const r = tw.getBoundingClientRect();
+    // 量之前先摆正，否则拿到的是上一次的位置和还没生效的新内容尺寸
+    this.el.style.left = '0px';
+    this.el.style.top = '0px';
+    const box = this.el.getBoundingClientRect();
+
+    const above = r.top - box.height - GAP;
+    const top = above >= MARGIN ? above : r.bottom + GAP;
+    let left = r.left + r.width / 2 - box.width / 2;
+    left = Math.max(MARGIN, Math.min(left, window.innerWidth - box.width - MARGIN));
+
+    this.el.style.left = `${Math.round(left)}px`;
+    this.el.style.top = `${Math.round(top)}px`;
+  }
+}
+
 export class WordPanel {
   /** @param {(lemma:string)=>Promise<object>} load 取词条详情
    *  @param {(lemma:string,status:number)=>Promise<any>} save 改掌握程度 */

@@ -243,3 +243,53 @@ article.doc h1 {
   text-underline-offset: 2px;
 }
 .typo-reset:hover { color: var(--accent); }
+
+/* ------------------------------ 悬停浮层 ------------------------------
+   Lute 的做法：悬停就给释义，点了才开编辑面板。这里要解决的是同一件事——
+   面板宽 430px、要占掉屏幕右侧一大条，而读到一半只想「瞄一眼这个词什么
+   意思」的时候，开面板的代价太大：视线要横跨屏幕，看完还得关掉。
+
+   挂在 <body> 上而不是正文里边：正文在面板打开时带 transform，
+   而 transform 会让子元素的 position: fixed 相对它定位、不再相对视口。
+   坐标用 getBoundingClientRect() 取，它给的本来就是算过 transform 的视口坐标。 */
+.tw-tip {
+  position: fixed; z-index: 55; max-width: 300px;
+  padding: 10px 12px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  font-family: var(--sans); font-size: 13.5px; line-height: 1.55;
+  /* 不接受指针事件：否则浮层压到词上面时会立刻触发词的 mouseleave，
+     浮层跟着消失，再触发 mouseenter……一秒钟闪十几次。 */
+  pointer-events: none;
+  opacity: 0; transform: translateY(3px);
+  transition: opacity .12s var(--ease), transform .12s var(--ease);
+}
+.tw-tip.show { opacity: 1; transform: none; }
+.tw-tip-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.tw-tip-word { font-family: var(--serif); font-size: 16px; font-weight: 600; }
+.tw-tip-gloss { margin-top: 3px; }
+.tw-tip-meta { font-size: 12px; color: var(--muted); margin-top: 5px; }
+.tw-tip-hint { font-size: 11.5px; color: var(--faint); margin-top: 5px; }
+@media (prefers-reduced-motion: reduce) {
+  .tw-tip { transition: none; }
+}
+
+/* ------------------------------ 专注模式 ------------------------------
+   Lute 有一个「隐藏右栏」的无干扰阅读。这里对应的是收起顶栏——
+   导航在读的时候用不上，却占着固定的 56px。
+
+   工具条留着但压淡，鼠标移上去或键盘聚焦时恢复实体。全隐藏的话，
+   退出专注模式的唯一办法就只剩「记得按 F」——而没人记得。
+   留一条看得见的出口，比多省 44px 值。 */
+body.focus-mode .topbar { display: none; }
+body.focus-mode .reader-bar {
+  top: 0; opacity: .38;
+  transition: opacity .18s var(--ease);
+}
+body.focus-mode .reader-bar:hover,
+body.focus-mode .reader-bar:focus-within { opacity: 1; }
+body.focus-mode .reader-body { padding-top: var(--sp-7); }
+@media (prefers-reduced-motion: reduce) {
+  body.focus-mode .reader-bar { transition: none; }
+}
