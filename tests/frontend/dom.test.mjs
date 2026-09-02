@@ -212,5 +212,80 @@ console.log('\n7. 结果面板');
   check('超纲词列出', host.textContent.includes('quixotic'));
 }
 
+
+/* ============================ 阅读器：热键与排版 ============================
+   jsdom 没有布局引擎，量不了「面板还盖不盖得住正文」（那条用 puppeteer 量了，
+   见 需要注意.md 第 16 条）。这里验的是它验得了的部分：事件流、DOM 状态、
+   以及写没写进 localStorage。 */
+console.log('\n8. 阅读器：掌握程度热键与排版控件');
+{
+  const detail = API[`/api/words/${API.__lemma__}`];
+  const posted = [];
+  const ctx = boot('reader', {
+    routes: { '/api/articles/1': API['/api/articles/1'] },
+    onFetch: (p, opts) => {
+      if (p.endsWith('/status')) {
+        posted.push(JSON.parse(opts.body).status);
+        return { ok: true, status: 200, json: async () => ({ status: posted.at(-1) }) };
+      }
+      if (p.startsWith('/api/words/')) return { ok: true, status: 200, json: async () => detail };
+      return undefined;
+    },
+  });
+  const mod = await import(JS('pages/reader.js'));
+  await mod.init({ articleId: '1' });
+
+  const key = (k) => ctx.doc.dispatchEvent(
+    new ctx.w.KeyboardEvent('keydown', { key: k, code: `Digit${k}`, bubbles: true, cancelable: true }));
+  const wait = () => new Promise((r) => setTimeout(r, 30));
+
+  qa(ctx, '.tw')[0].dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  await wait();
+  check('开面板时给 body 打标记（正文靠它让位）',
+        ctx.doc.body.classList.contains('panel-open'));
+
+  const modeBefore = q(ctx, '#doc').className;
+  key('3');
+  await wait();
+  check('面板开着按 3 → 改掌握程度', posted.at(-1) === 3, `posted=${posted}`);
+  check('同一下按键不会顺手切模式', q(ctx, '#doc').className === modeBefore,
+        `${modeBefore} -> ${q(ctx, '#doc').className}`);
+  check('面板里把热键写出来了', /1.*2.*3.*4.*5.*W.*I/.test(q(ctx, '.panel-keys')?.textContent || ''));
+
+  ctx.doc.dispatchEvent(new ctx.w.KeyboardEvent('keydown', { key: 'w', bubbles: true }));
+  await wait();
+  check('W = 已掌握（98）', posted.at(-1) === 98, `posted=${posted}`);
+
+  ctx.doc.dispatchEvent(new ctx.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await wait();
+  check('关面板时撤掉 body 标记', !ctx.doc.body.classList.contains('panel-open'));
+
+  const n = posted.length;
+  key('3');
+  await wait();
+  check('面板关掉后，3 重新是「对照」模式', q(ctx, '#doc').className.includes('mode-both'));
+  check('而且没有再改掌握程度', posted.length === n);
+
+  /* ---- 排版控件 ---- */
+  const rootStyle = () => ctx.doc.documentElement.style.getPropertyValue('--reader-size');
+  check('初始就把字号写进 CSS 变量', rootStyle() === '19px', rootStyle());
+  q(ctx, '#typo').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  check('点 Aa 展开控件', !q(ctx, '#typoPop').hidden);
+  q(ctx, 'button[data-typo="size"][data-step="1"]')
+    .dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  check('调大一档 → 21px', rootStyle() === '21px', rootStyle());
+  check('存进 localStorage', ctx.w.localStorage.getItem('wl-reader-size') === '3',
+        ctx.w.localStorage.getItem('wl-reader-size'));
+  q(ctx, '#typoReset').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  check('恢复默认回到 19px', rootStyle() === '19px', rootStyle());
+
+  for (let i = 0; i < 4; i++)
+    q(ctx, 'button[data-typo="size"][data-step="1"]')
+      .dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  check('到顶就禁用，不会越界',
+        q(ctx, 'button[data-typo="size"][data-step="1"]').disabled && rootStyle() === '23px',
+        rootStyle());
+}
+
 console.log(`\n${ok}/${ok + fail} 通过`);
 process.exit(fail ? 1 : 0);

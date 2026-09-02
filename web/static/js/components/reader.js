@@ -226,6 +226,13 @@ const STRENGTH = {
   none:   { label: '无线索',   cls: 'bad' },
 };
 
+/* 掌握程度热键。借自 Lute：它把光标放到词上按 1-5 / W / I，
+   省掉「点词 → 开面板 → 点 chip」这三步里的后两步。
+   这里换成「面板开着 = 已经选中了这个词」当判定条件——不用追踪悬停在谁身上，
+   也就不会出现「想切模式却改了某个词的掌握程度」这种误伤。
+   数字键和阅读页的模式切换撞车，让路逻辑写在 pages/reader.js 里。 */
+const HOTKEYS = { '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, 'w': 98, 'i': 99 };
+
 export const STATUSES = [
   [1, '刚认识'], [2, '有印象'], [3, '较熟'], [4, '很熟'], [5, '接近掌握'],
   [98, '已掌握'], [99, '忽略'],
@@ -247,12 +254,22 @@ export class WordPanel {
       if (btn) this.setStatus(Number(btn.dataset.status));
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.el.classList.contains('open')) this.close();
+      if (!this.el.classList.contains('open')) return;
+      if (e.key === 'Escape') { this.close(); return; }
+      if (!this.lemma || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.target.closest && e.target.closest('input, textarea, select')) return;
+      const status = HOTKEYS[e.key.toLowerCase()];
+      if (status === undefined) return;
+      e.preventDefault();
+      this.setStatus(status);
     });
   }
 
   close() {
     this.el.classList.remove('open');
+    // 正文靠这个类让位。放在这里而不是调用方，是因为面板有三条关闭路径
+    // （按钮、Esc、词库页切换），漏掉任何一条正文就永远偏在一边。
+    document.body.classList.remove('panel-open');
     this.lemma = null;
   }
 
@@ -260,6 +277,7 @@ export class WordPanel {
     if (!lemma) return;
     this.lemma = lemma;
     this.el.classList.add('open');
+    document.body.classList.add('panel-open');
     this.el.innerHTML = '<div class="panel-inner"><div class="empty">加载中…</div></div>';
     try {
       this.draw(await this.load(lemma));
@@ -320,6 +338,10 @@ export class WordPanel {
         ${STATUSES.map(([v, label]) =>
           `<button class="chip${w.status === v ? ' on' : ''}" data-status="${v}">${label}</button>`
         ).join('')}
+      </div>
+      <div class="panel-keys">
+        <span>快捷键</span>
+        ${STATUSES.map(([v]) => `<kbd>${v === 98 ? 'W' : v === 99 ? 'I' : v}</kbd>`).join('')}
       </div>
 
       <div class="panel-label">

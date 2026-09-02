@@ -32,9 +32,12 @@
 
 article.doc {
   font-family: var(--serif);
-  font-size: 19px;
+  /* 字号和栏宽由读者自己定（见 .typo 控件），存在 localStorage。
+     写成 var(--x, 默认值)：用户没设过就用默认值，设过了就一路生效——
+     下面那条窄屏媒体查询只改默认值，不覆盖用户的选择。 */
+  font-size: var(--reader-size, 19px);
   line-height: 1.9;
-  max-width: var(--measure);
+  max-width: var(--reader-measure, var(--measure));
   margin: 0 auto;
   letter-spacing: .003em;
   color: var(--text);
@@ -153,6 +156,90 @@ article.doc h1 {
 }
 
 @media (max-width: 820px) {
-  article.doc { font-size: 17.5px; }
+  article.doc { font-size: var(--reader-size, 17.5px); }
   .reader-body { padding: var(--sp-5) var(--sp-4) var(--sp-7); }
 }
+
+/* 面板打开时把正文推开，而不是盖在它上面。
+   面板 fixed 在右边 430px，正文是 --measure(760px) 居中，两者在**视口窄于
+   1620px 时重叠**：1440 的笔记本上压掉每行最后约 90px——正好是行末，
+   读到那里眼睛要往回找，是最难受的位置。而这台机器上大部分笔记本都是 1440。
+
+   位移量正好等于重叠量：正文右缘 = 50vw + 380，面板左缘 = 100vw - 430，
+   重叠 = 810px - 50vw。视口够宽时这个值是负的，max() 归零，正文纹丝不动。
+
+   用 transform 而不是改 padding 或宽度：改宽度会让每行重新折行、段落高度
+   跟着变，而 lockHeights() 锁进去的 min-height 是按旧宽度算的——一开面板
+   整篇文章的高度就全错了，而那正是 lockHeights 存在的理由。transform 不触发重排。
+
+   1240px 以下不推：再推正文左边就贴到窗口边上了，那里本来也没有富余空间，
+   盖住反而是对的（手机上面板本来就是 92vw 的抽屉）。 */
+@media (min-width: 1000px) {
+  .reader-body { transition: transform .22s var(--ease); }
+  body.panel-open .reader-body {
+    /* clamp 的三个值分别是：不让位、要让多少、最多能让多少。
+       · 要让多少 = 重叠量 + 一点间隙 = 栏宽/2 + 面板 430px + 24px - 50vw
+       · 最多能让多少 = 正文左边的富余 = 50vw - 栏宽/2 - 24px
+       栏宽走变量而不是写死 380px：读者把栏宽调窄之后，让位量要跟着变小，
+       否则正文会被推得比需要的更靠左。
+       写成连续函数而不是「宽于某个值才让位」：断崖式的阈值会让 1100px 这类
+       窗口一点不让、白白被盖掉 260px，而它明明还能让出 146px。
+       窗口再窄时第三个值变成负数，clamp 取第一个值归零——面板本来就是
+       92vw 的抽屉了，让位没有意义。 */
+    --half: calc(var(--reader-measure, var(--measure)) / 2);
+    transform: translateX(calc(-1 * clamp(
+      0px,
+      var(--half) + 430px + var(--sp-5) - 50vw,
+      50vw - var(--half) - var(--sp-5)
+    )));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-body { transition: none; }
+}
+
+/* 掌握程度热键的提示。Lute 的做法是把光标放到词上按 1-5，
+   这里改成「面板开着 = 已经选中了这个词」，不用再猜按键作用在谁身上。 */
+.panel-keys {
+  font-size: 11.5px; color: var(--faint); margin-top: var(--sp-2);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.panel-keys kbd {
+  font-family: var(--mono); font-size: 11px; line-height: 1.5;
+  padding: 0 5px; border-radius: 4px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--muted);
+}
+
+/* ------------------------------ 排版控件 ------------------------------
+   盯着一屏英文读五分钟是这个应用的主要姿势，而字号和栏宽原先是写死的。
+   Readest / Thorium 这类阅读器都把这两样交给读者——个人视力、屏幕距离、
+   窗口大小差得太远，作者定不了。 */
+
+.typo-wrap { position: relative; }
+.typo-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
+  min-width: 232px; padding: var(--sp-4);
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column; gap: var(--sp-3);
+}
+.typo-pop[hidden] { display: none; }
+.typo-row { display: flex; align-items: center; gap: var(--sp-3); }
+.typo-row > span:first-child {
+  font-size: 12px; color: var(--muted); flex: 1;
+}
+.typo-row output {
+  font-family: var(--mono); font-size: 12px; color: var(--text);
+  min-width: 44px; text-align: right; font-variant-numeric: tabular-nums;
+}
+.typo-row button {
+  width: 26px; height: 26px; padding: 0; line-height: 1;
+  border-radius: var(--radius-sm); font-size: 14px;
+}
+.typo-row button:disabled { opacity: .4; cursor: default; }
+.typo-reset {
+  font-size: 12px; color: var(--muted); background: none; border: none;
+  padding: 0; text-align: left; cursor: pointer; text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.typo-reset:hover { color: var(--accent); }
