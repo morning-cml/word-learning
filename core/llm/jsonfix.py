@@ -20,6 +20,11 @@ import json
 import re
 from typing import Any
 
+try:                        # 可选依赖：装了就多一层修复，没装照常跑
+    import json_repair as _json_repair
+except ImportError:         # pragma: no cover - 取决于装没装
+    _json_repair = None
+
 _FENCE = re.compile(r"```(?:json|JSON)?\s*(.*?)```", re.DOTALL)
 _TRAILING_COMMA = re.compile(r",\s*([}\]])")
 
@@ -30,12 +35,14 @@ class JsonParseError(ValueError):
         self.raw = raw
 
 
+def _first_bracket(text: str) -> int:
+    """第一个 { 或 [ 的下标，没有则 -1。"""
+    return min((i for i in (text.find("{"), text.find("[")) if i != -1), default=-1)
+
+
 def _balanced_slice(text: str) -> str | None:
     """从第一个 { 或 [ 起，按括号配对截出完整的一段（跳过字符串内的括号）。"""
-    start = min(
-        (i for i in (text.find("{"), text.find("[")) if i != -1),
-        default=-1,
-    )
+    start = _first_bracket(text)
     if start == -1:
         return None
     opener = text[start]
@@ -62,10 +69,36 @@ def _balanced_slice(text: str) -> str | None:
     return None
 
 
-def _repair_truncated(fragment: str) -> str | None:
-    """JSON 被 max_tokens 截断时，尽量补齐括号救回前面已完整的部分。"""
-    in_str, escaped, stack = False, False, []
-    for ch in fragment:
+def _repair_truncated(fragment: str) -> list[str]:
+    """JSON 被 max_tokens 截断时，尽量补齐括号救回前面已完整的部分。
+
+    返回一组候选，「保留得最多」的排在前面，调用方逐个试。给一组而不是一个：
+    末尾那半截值该不该丢，光看字符串判不出来，所以两种都给出去让 json 自己裁决。
+    本项目的四种 schema 全是字符串和数组，没有一个数字字段，
+    所以「优先保留、解析不过再回退」是安全的。
+
+    回退点这一步踩过两个坑，都不报错，只会让这一层安静地失效：
+
+    · **回退点必须落在字符串之外。** 原来是 rfind(",")，找到的往往是正文里的
+      逗号——中英对照的正文里逗号遍地都是——回退点于是落在句子中间，
+      截出来的 JSON 必然不合法。
+    · **回退点和括号栈必须取自同一个位置。** 栈是一路扫到末尾算出来的，
+      回退却把字符串截回了更早的地方：被截掉的那几个 } ] 已经在栈里弹过一次，
+      再按末尾的栈去补就少补几个，补出来照样不合法。
+
+    两条叠加起来，这一层对本项目真正会产出的形状
+    （`{"sentences": [{...}, {"en": "下一句被截断`）**一次都没救回来过**——
+    而表现出来只是「解析失败、重试一次」：多烧一次三十秒的调用，没人会发现。
+    """
+    start = _first_bracket(fragment)
+    if start == -1:
+        return []
+    fragment = fragment[start:]
+
+    in_str = escaped = False
+    stack: list[str] = []
+    cut, cut_stack = -1, []          # 最后一个落在字符串之外的逗号，及它那一刻的栈
+    for i, ch in enumerate(fragment):
         if in_str:
             if escaped:
                 escaped = False
@@ -78,18 +111,22 @@ def _repair_truncated(fragment: str) -> str | None:
             in_str = True
         elif ch in "{[":
             stack.append("}" if ch == "{" else "]")
-        elif ch in "}]" and stack:
-            stack.pop()
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+        elif ch == "," and stack:
+            cut, cut_stack = i, list(stack)
+
     if not stack and not in_str:
-        return None
-    patched = fragment
+        return []                    # 根本没被截断，轮不到这一层
+
+    # 回退：连同末尾那个残缺的键值对一起丢掉，并且用**那个逗号处**的栈来收尾
+    back = [fragment[:cut] + "".join(reversed(cut_stack))] if cut >= 0 else []
     if in_str:
-        patched += '"'
-    # 丢掉最后一个可能残缺的键值对
-    cut = max(patched.rfind(","), patched.rfind("{"), patched.rfind("["))
-    if cut > 0 and patched[cut] == ",":
-        patched = patched[:cut]
-    return patched + "".join(reversed(stack))
+        # 截在字符串中间，那段文字本身就是残的，优先整个丢掉；
+        # 没有可回退的逗号时（`{"en": "半句`）才退而求其次把引号补上。
+        return [*back, fragment + '"' + "".join(reversed(stack))]
+    return [fragment + "".join(reversed(stack)), *back]
 
 
 def loads(text: str) -> Any:
@@ -116,11 +153,48 @@ def loads(text: str) -> Any:
                 continue
 
     for cand in candidates:                   # 第 4 层：截断补齐
-        patched = _repair_truncated(cand)
-        if patched:
-            try:
-                return json.loads(_TRAILING_COMMA.sub(r"\1", patched))
-            except json.JSONDecodeError:
+        for patched in _repair_truncated(cand):
+            for attempt in (patched, _TRAILING_COMMA.sub(r"\1", patched)):
+                try:
+                    return json.loads(attempt)
+                except json.JSONDecodeError:
+                    continue
+
+    # 第 5 层：整段语法修复。json_repair 是个按 JSON 文法走的解析器，
+    # 能修上面四层修不了的一类东西——它们都在真实输出里出现过：
+    #   {“a”: 1}                     结构位置上的中文引号
+    #   {"en": "He said "go", ok"}   正文里没转义的引号
+    #   {"zh": "第一行\n第二行"}       正文里没转义的换行
+    #   {'a': 1} / None / True       单引号与 Python 字面量
+    #
+    # 本模块顶上那条「中文引号一律不管」的注释，理由是「全局替换会把正文里的
+    # “ ” 「 」改坏」——那个理由只对**正则替换**成立。真解析器分得清哪个引号
+    # 在结构位置、哪个在字符串里面（实测：正文里的 “ ” 《 》 —— …… 全部原样保留）。
+    #
+    # 排在第 4 层之后，不是之前：json_repair 修截断的办法是**补默认值**
+    # （给缺的字段填空字符串 / null），而本模块第 4 层只丢不补。
+    # 「宁可少一句，也不要凭空多一句模型没写的」——先让只丢不补的那层试。
+    #
+    # 没装也能跑：这一层是加分项，缺了只是少修几种畸形，和 CEFR 词表缺失时
+    # 退回内置兜底表是同一个处理方式。
+    if _json_repair is not None:
+        for cand in candidates:
+            # 截断的候选不交给它。json_repair 修截断的办法是**补默认值**，
+            # 实测 `{"sentences": [{"e` 会被补成 `{"sentences": [["e"]]}`——
+            # 把半个键名编成了一个值。本模块第 4 层只丢不补，宁可少一句，
+            # 也不要凭空多一句模型没写的。所以残缺的输入到第 4 层为止。
+            if _repair_truncated(cand):
                 continue
+            try:
+                # 它自己出错不该盖住真正的报错，换下一个候选继续
+                got = _json_repair.loads(cand)
+            except Exception:
+                continue
+            # 空结果不算修好。json_repair 对「抱歉，我不能完成」这类纯文字
+            # 返回的是 ""，对空输入也是 ""——照单收下就等于把「模型拒绝回答」
+            # 悄悄变成「成功解析出一个空文档」，那正是这个项目最不能接受的
+            # 那种失败（见 需要注意.md 第 2 条）。走到这一层还是空，就报错。
+            if got not in ("", None, [], {}):
+                return got
 
     raise JsonParseError("无法从模型输出中解析出 JSON", text[:1000])
