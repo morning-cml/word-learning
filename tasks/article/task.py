@@ -19,12 +19,34 @@ from .schema import (
 # 每段承载的目标词数。研究（SRS-Stories）给的经验区间是每篇 10-20 个，
 # 但那是在「其余全部是已知词」的前提下；我们的生词密度更高，所以压到每段 3 个。
 WORDS_PER_PARAGRAPH = 3
-SENTENCES_PER_PARAGRAPH = 5
 MAX_PARAGRAPHS = 6
+
+# 每段句数 = 本段目标词数 + 这个富余量。富余的那几句不承载目标词，
+# 用来推情节、以及给相邻句留出铺线索的地方。
+#
+# **篇幅必须跟着词数走。** 之前每段句数写死 5 句、段数又有两段下限，
+# 结果是 1 到 6 个词全都得到「2 段约 170 词」——给一个词和给六个词读一样长的
+# 东西，多出来的全是稀释。18 到 40 个词那头同样平：全是 510 词。
+#
+# 富余量取 0，也就是「每个目标词一句」，总长落在词数的 17-20 倍。
+# 这个值没有实测依据——本机 7 篇里只有 3 篇有线索审计数据，而且全在
+# 43-59 倍那一端，17-28 倍区间一个观测都没有。
+#
+# 之所以敢先按低值发：**这个风险有仪表。** clue_strength 每次生成都测，
+# 而且是结果面板的第一个数字、文库列表里的分段条。密度真伤到线索，
+# 下一两篇就会看见 3/5 而不是 5/5——错了会响，不是沉默失败。
+# 真降下来了，把这个常数调回 1 或 2 即可（1 ≈ 23 倍，2 ≈ 28 倍）。
+SENTENCE_SCAFFOLD = 0
+# 再少就不成篇了。一句话的「文章」没有情节可言，也没有相邻句可以铺线索。
+MIN_SENTENCES_PER_PARAGRAPH = 2
+
+# 每句多少词。用来估篇幅，不是硬约束（prompt 里写的是 12-22 词）。
+# 17 是从本机 7 篇实测的每句词数中位数来的，别拍脑袋改。
+WORDS_PER_SENTENCE = 17
+
 MAX_REPAIRS = 2
-# 一次最多接受多少个词。再多，sizing() 会把每段压到十几个目标词，5 句话根本
-# 塞不下，校验必然不过——MAX_REPAIRS 和 MAX_CLUE_FIXES 会被整段整段地烧光
-# 才轮到下一段。该做的是分批，所以在入口就拦住。
+# 一次最多接受多少个词。再多，sizing() 会把每段压到十几个目标词，
+# 一段里塞十几个生词读起来就是填空作业了。该做的是分批，所以在入口就拦住。
 MAX_WORDS = 40
 # 语境线索不达标时的重写轮数。这是整个管线里最值得花预算的地方——
 # 词出现了但读者猜不出词义，这一遍就白读了，跟单词书没区别。
@@ -37,10 +59,20 @@ OFFENDER_FLOOR = 1
 
 
 def sizing(n_words: int) -> tuple[int, int, int]:
-    """按目标词数量决定篇幅。返回 (段数, 每段词数, 每段句数)。"""
-    n_para = max(2, min(MAX_PARAGRAPHS, math.ceil(n_words / WORDS_PER_PARAGRAPH)))
+    """按目标词数量决定篇幅。返回 (段数, 每段词数, 每段句数)。
+
+    三个数都跟着 n_words 走——尤其是句数。它以前是个常数，那正是
+    「给 1 个词和给 6 个词读到一样长的文章」的根因。
+    """
+    n_para = max(1, min(MAX_PARAGRAPHS, math.ceil(n_words / WORDS_PER_PARAGRAPH)))
     per_para = max(1, math.ceil(n_words / n_para))
-    return n_para, per_para, SENTENCES_PER_PARAGRAPH
+    n_sent = max(MIN_SENTENCES_PER_PARAGRAPH, per_para + SENTENCE_SCAFFOLD)
+    return n_para, per_para, n_sent
+
+
+def estimated_words(n_para: int, n_sent: int) -> int:
+    """这批规划大概会写出多少词。首页在调模型之前就要告诉用户篇幅。"""
+    return n_para * n_sent * WORDS_PER_SENTENCE
 
 
 def _appears(word: str, text: str) -> str | None:

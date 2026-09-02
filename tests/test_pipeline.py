@@ -9,13 +9,20 @@
 """
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from conftest import GOOD_AUDIT, GOOD_PARAGRAPH, GOOD_PLAN, run_pipeline
 from tasks.article.schema import (
     coerce_audits, coerce_glossary, coerce_paragraph, coerce_plan,
 )
-from tasks.article.task import ArticleTask, sizing
+from tasks.article.task import (
+    MAX_WORDS,
+    ArticleTask,
+    estimated_words,
+    sizing,
+)
 
 
 # ------------------------------------------------------- 形状归一（纯函数）
@@ -198,10 +205,60 @@ def test_补线索把机械校验搞坏就丢弃(fake_llm, happy_responses):
 
 # --------------------------------------------------------------------- 篇幅
 
-@pytest.mark.parametrize("n,expect_paras", [(0, 2), (1, 2), (3, 2), (8, 3), (18, 6), (40, 6)])
-def test_篇幅规划(n, expect_paras):
-    assert sizing(n)[0] == expect_paras
+def _est(n: int) -> int:
+    n_para, _per, n_sent = sizing(n)
+    return estimated_words(n_para, n_sent)
 
+
+def test_篇幅跟着词数走():
+    """以前每段句数写死 5 句、段数又有两段下限，于是 **1 到 6 个词全都得到
+    「2 段约 170 词」**——给一个词和给六个词读一样长的东西，多出来的全是稀释；
+    18 到 40 个词那头同样平，全是 510 词。
+
+    这条断言的是「输入变了输出就得变」，不写死具体数字：数字是可以调的
+    （SENTENCE_SCAFFOLD），而「不能有一大段平台」是不能退的。
+    """
+    from tasks.article.task import MAX_PARAGRAPHS, WORDS_PER_PARAGRAPH
+
+    est = [_est(n) for n in range(1, MAX_WORDS + 1)]
+    assert est == sorted(est), "词数增加，篇幅不能反而变短"
+    assert est[-1] > est[0] * 4, "整个区间的篇幅跨度不能这么小"
+
+    # 平台只在「舒适容量」以内卡死。超出之后段数封顶，每段句数是整数，
+    # 只能每 MAX_PARAGRAPHS 个词跳一档——而那个区间 plan_preview 本来就在
+    # 提示「建议分批」，不是该优化的地方。把范围写出来，不是把阈值放宽。
+    comfortable = MAX_PARAGRAPHS * WORDS_PER_PARAGRAPH
+    longest, run = 1, 1
+    for a, b in itertools.pairwise(est[:comfortable]):
+        run = run + 1 if a == b else 1
+        longest = max(longest, run)
+    assert longest <= 3, f"{comfortable} 词以内有 {longest} 个连续词数篇幅相同，太平了"
+
+
+@pytest.mark.parametrize("n", range(2, 41))
+def test_每个目标词分到的篇幅是稳定的(n):
+    """篇幅应当和词数成比例，而不是阶梯式地跳。
+
+    n=1 不在这条里：一句话的「文章」没有情节可言，也没有相邻句可以铺线索，
+    所以有个下限，比例在那一点上必然偏高。
+    """
+    ratio = _est(n) / n
+    assert 15 <= ratio <= 24, f"{n} 个词 -> {_est(n)} 词，每词 {ratio:.0f} 倍"
+
+
+def test_段数有上限而句数没有():
+    """段数封顶之后，词再多只能靠加句数来消化——不封的话 40 个词会排出
+    十几段，而那已经不是一篇文章了。"""
+    from tasks.article.task import MAX_PARAGRAPHS
+
+    assert sizing(MAX_WORDS)[0] == MAX_PARAGRAPHS
+    assert sizing(MAX_WORDS)[2] > sizing(6)[2]
+
+
+def test_一个词也给得出一篇():
+    """下限是两句：一句承载目标词，一句给它铺线索。"""
+    n_para, per_para, n_sent = sizing(1)
+    assert (n_para, per_para, n_sent) == (1, 1, 2)
 
 # ------------------------------------------------- 修复预算不能花在目标词身上
 

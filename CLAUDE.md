@@ -78,7 +78,7 @@ python.exe），以及报错有地方显示。改用 `pythonw` / `start` 隐藏�
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest                                  # Python，298 项
+pytest                                  # Python，336 项
 
 cd tests/frontend
 npm install && python make_fixtures.py && npm test    # 前端，107 项

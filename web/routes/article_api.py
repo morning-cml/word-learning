@@ -22,7 +22,13 @@ from core.provider import registry
 from core.provider.base import ProviderError
 from core.store import db
 from core.store.models import STATUS_LABELS
-from tasks.article.task import MAX_PARAGRAPHS, MAX_WORDS, WORDS_PER_PARAGRAPH, sizing
+from tasks.article.task import (
+    MAX_PARAGRAPHS,
+    MAX_WORDS,
+    WORDS_PER_PARAGRAPH,
+    estimated_words,
+    sizing,
+)
 
 router = APIRouter(prefix="/api", tags=["article"])
 
@@ -122,7 +128,7 @@ def plan_preview(payload: dict = Body(...)) -> dict:
         "paragraphs": n_para,
         "per_paragraph": per_para,
         "sentences_per_paragraph": n_sent,
-        "estimated_words": n_para * n_sent * 17,
+        "estimated_words": estimated_words(n_para, n_sent),
         "warning": warning,
     }
 

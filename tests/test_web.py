@@ -276,3 +276,32 @@ def test_不中断时照常跑完并落库(client, temp_db, monkeypatch, fake_ll
     assert '"done"' in body and '"saved"' in body
     with temp_db.session() as s:
         assert len(temp_db.list_articles(s)) == 1
+
+
+def test_预览的篇幅和任务层用同一个公式(client):
+    """预览是在调模型**之前**告诉用户「这批词大概会写多长」。
+
+    公式写两份的话，改了 sizing() 的人不会想到还要回来改接口里那一行，
+    于是预览说 170 词、实际写出 340 词——而「界面说的」和「程序实际做的」
+    不一致，正是用户没法自己发现的那类错（见 CLAUDE.md 开头那两条）。
+    """
+    from tasks.article.task import estimated_words, sizing
+
+    for n in (1, 3, 6, 12, 20):
+        words = " ".join(f"word{i}" for i in range(n))
+        d = client.post("/api/article/plan-preview", json={"words": words}).json()
+        n_para, _per_para, n_sent = sizing(n)
+        assert d["count"] == n
+        assert (d["paragraphs"], d["sentences_per_paragraph"]) == (n_para, n_sent)
+        assert d["estimated_words"] == estimated_words(n_para, n_sent)
+
+
+def test_预览的篇幅跟着词数走(client):
+    """用户报的就是这个：给 1 个词和给 6 个词，提示都是「2 段约 170 词」。"""
+    def est(n):
+        words = " ".join(f"word{i}" for i in range(n))
+        return client.post("/api/article/plan-preview",
+                           json={"words": words}).json()["estimated_words"]
+
+    assert est(1) < est(3) < est(6) < est(12), "篇幅必须随词数增长"
+    assert est(1) != est(6), "一个词和六个词不能给出同样的篇幅"
