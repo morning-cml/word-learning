@@ -205,20 +205,29 @@ def within(word: str, max_level: str) -> bool:
     return LEVEL_INDEX[lv] <= LEVEL_INDEX.get(max_level, 0)
 
 
-def scan(text: str, max_level: str, *, allow: set[str] | None = None,
-         names: set[str] | None = None) -> dict:
+def scan(text: str, max_level: str, *, allow: set[str] | None = None) -> dict:
     """扫描文本找出超纲词。
 
     allow  传不该被判成超纲的词：本次的目标词（它们本来就是要学的生词），
            以及用户标成「忽略」的词条（Lute 的 status 99，「专有名词等」）。
            两者待遇完全一样，所以合成一份传进来，不在这里分两个参数——
            同一条规矩两份实现迟早会分叉。
-    names  传选题阶段声明的人名 / 地名。有了它就不用再猜句首那个大写词
-           到底是专有名词还是生词——生成的时候本来就知道，别把信息扔了再猜。
+
+    **这里不接受模型申报的人名。** 曾经有过一个 names 参数，选题阶段模型
+    报什么就无条件放行什么。问题不在「模型会不会撒谎」，在于**被检查的一方
+    控制了检查器**——而 prompt 里那句「漏报了，你的角色名会被当成超纲词退回来
+    重写」是单边施压：多报没有代价，少报要挨一次重写，模型自然会多报。
+    构造一下能把超纲率从 26% 压到 7%，而界面上只会显示一个更好看的数字。
+
+    剩下的判据只有一条，而且是**独立于模型的**：这个大写词在别处以大写出现在
+    句子中间。真专有名词几乎一定会（叙事里名字大量出现在句中），
+    而句首大写只是句子开头，不构成任何证据。
+    只在句首露过面的名字会被当成生词退回来重写一次，然后用户标一次「忽略」，
+    从此不再犯——这正是 Lute 那个循环。实测本机 7 篇：完全不信 names，
+    多余修复 0 次。
     """
     targets = [w.strip() for w in (allow or set()) if w and w.strip()]
     allow_lemmas = {resolve(w) for w in targets}
-    declared = {n.lower() for n in (names or set())}
     spans = tokenize_spans(text)
     # 句中出现的大写词是专有名词的独立证据，不依赖模型报得全不全
     mid_sentence_caps: set[str] = set()
@@ -243,8 +252,9 @@ def scan(text: str, max_level: str, *, allow: set[str] | None = None,
             # 句中大写 = 专有名词，跳过。
             # 句首大写只是句子开头，不能一起跳——那等于每句第一个词都逃过
             # 检测，模型只要把生词放句首就绕开了整把标尺。只在有专有名词
-            # 实据时才跳：选题阶段声明过，或者它在别处以大写出现在句中。
-            if not at_sentence_start or low in declared or low in mid_sentence_caps:
+            # 实据时才跳，而实据只认一条：它在别处以大写出现在句中。
+            # （模型自己申报的 names 不算实据，理由见函数开头。）
+            if not at_sentence_start or low in mid_sentence_caps:
                 continue
         total += 1
         base = resolve(tok)

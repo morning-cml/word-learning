@@ -181,17 +181,32 @@ class ArticleTask(Task):
                             f"必须自然用上 {word}，并让上下文能推出它的意思")
                 )
 
-        report = cefr.scan(text, level, allow=allow, names=names)
+        report = cefr.scan(text, level, allow=allow)
         budget = max(OFFENDER_FLOOR, round(OFFENDER_LIMIT * report["total_words"]))
         if report["offender_count"] > budget:
             worst = [o["surface"] for o in report["offenders"][:8]]
+            hint = f"把这些词换成 CEFR {level} 以内的说法"
+            # 模型申报的人名不再能豁免超纲检查（那等于让被检查的一方控制检查器，
+            # 见 cefr.scan 开头），但这份申报没有被扔掉——它在这里换了个身份：
+            # 从「放行凭据」变成「修法提示」。程序唯一认的实据是「这个大写词
+            # 在句中出现过」，所以对申报过的名字，正确的修法是把它用进句子中间，
+            # 而不是换掉角色的名字。改完下一轮 mid_sentence_caps 就认了，
+            # 这一处从此不再报——是个能自己收敛的循环。
+            declared = {n.lower() for n in names}
+            flagged = [w for w in worst if w.lower() in declared]
+            if flagged:
+                hint += (
+                    "；其中 " + "、".join(flagged) + " 你申报过是专有名词——"
+                    "别换掉它们，改成让它们至少在某句话的**中间**出现一次。"
+                    "只在句首露过面的大写词，程序分不出是名字还是生词。"
+                )
             problems.append(
                 Problem(
                     "too_hard",
                     f"本段有 {report['offender_count']} 个超纲词（占 "
                     f"{report['offender_rate']:.1%}，本段上限 {budget} 个）："
                     + "、".join(worst),
-                    f"把这些词换成 CEFR {level} 以内的说法",
+                    hint,
                 )
             )
         return problems
@@ -451,7 +466,7 @@ class ArticleTask(Task):
         }
         yield {"type": "done", "document": doc, "stats": self._stats(
             doc, words, level, llm, total_repairs, dropped,
-            all_audits, total_clue_fixes, names, exempt,
+            all_audits, total_clue_fixes, exempt,
         )}
 
     @staticmethod
@@ -561,7 +576,7 @@ class ArticleTask(Task):
     @staticmethod
     def _stats(doc: dict, words: list[str], level: str, llm: LLM,
                repairs: int, dropped: list[str],
-               audits: list[dict], clue_fixes: int, names: set[str],
+               audits: list[dict], clue_fixes: int,
                exempt: set[str] | None = None) -> dict:
         text = " ".join(
             s.get("en", "")
@@ -571,7 +586,7 @@ class ArticleTask(Task):
         hit = [w for w in words if _appears(w, text)]
         # 和 check_paragraph 用同一份豁免集合：结果面板报的「超纲词占比」
         # 必须和管线实际拦的东西一致，否则界面说的和实际拦的对不上。
-        report = cefr.scan(text, level, allow=exempt or set(words), names=names)
+        report = cefr.scan(text, level, allow=exempt or set(words))
         strength = {"strong": 0, "weak": 0, "none": 0}
         for a in audits:
             strength[a.get("strength") or "none"] += 1

@@ -328,6 +328,40 @@ def test_收敛不影响模型漏标时的兜底(fake_llm, happy_responses):
     assert stats["targets_hit"] == 2
 
 
+def test_申报的人名不再放行_但会变成修法提示(cefr_table):
+    """names 从「放行凭据」降成「修法提示」——信息没扔，身份变了。
+
+    程序唯一认的实据是「这个大写词在句中出现过」，所以对申报过的名字，
+    正确的修法是**把它用进句子中间**，而不是换掉角色的名字。改完下一轮
+    mid_sentence_caps 就认了，这一处从此不再报——是个能自己收敛的循环。
+    如果只说「把这些词换成 B2 以内的说法」，模型只能去改角色名。
+    """
+    cefr_table({"the": "A1", "was": "A1", "quiet": "A1", "that": "A1",
+                "night": "A1", "walked": "A1", "home": "A1", "alone": "A1"})
+    #  两个都只在句首露过面。要两个是因为 OFFENDER_FLOOR = 1——
+    #  单段容忍一个超纲词，一个的话根本不会触发 too_hard。
+    para = {"sentences": [
+        {"en": "Riverton was quiet that night.", "zh": "那天夜里 Riverton 很安静。",
+         "targets": []},
+        {"en": "Ashford walked home alone.", "zh": "Ashford 独自走回家。", "targets": []},
+    ]}
+
+    #  申报了也照样被判超纲
+    problems = ArticleTask().check_paragraph(
+        para, [], "B2", allow=set(), names={"Riverton", "Ashford"})
+    assert [p.kind for p in problems] == ["too_hard"]
+    assert "Riverton" in problems[0].detail
+
+    #  但修法提示要说到点子上：让它出现在句中，别换名字
+    hint = problems[0].hint
+    assert "Riverton" in hint and "中间" in hint
+    assert "别换掉" in hint
+
+    #  没申报过的词就是普通的超纲词，不给这条提示
+    plain = ArticleTask().check_paragraph(para, [], "B2", allow=set(), names=set())
+    assert "别换掉" not in plain[0].hint
+
+
 # ------------------------------------------------------------- 标成忽略的词
 
 def test_标成忽略的词不再算超纲(fake_llm, happy_responses):

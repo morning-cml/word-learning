@@ -34,28 +34,38 @@ def test_句首与句中判定一致():
 
 
 @pytest.mark.parametrize("text", [
-    "They walked to London with Maria and her dog.",     # 专有名词在句中
-    "Maria walked home. London was quiet that night.",   # 专有名词在句首
+    "They walked to London with Maria and her dog.",   # 两个都出现在句中
+    "Maria walked home. She met London with Maria.",   # 句首出现过，句中也出现过
 ])
-def test_专有名词不算超纲(text):
-    assert offenders(text, names={"Maria", "London"}) == set()
+def test_句中出现过的大写词不算超纲(text):
+    """唯一被认可的专有名词实据：这个大写词在别处以大写出现在句子中间。
+
+    它**独立于模型**——不依赖任何申报，所以模型骗不了它。
+    """
+    assert offenders(text) == set()
 
 
-def test_声明了人名就能无条件检测句首词():
-    """把「猜」换成「用选题阶段本来就有的信息」。
+def test_只在句首露过面的大写词照查不误():
+    """这里曾经可以靠 names 无条件放行，而 names 是模型自己报的。
 
-    Ubiquitous 不在 CEFR-J 词表里，单看一个 token 和人名分不开；
-    但 plan 声明了 names 之后就不用分了。
+    问题不在「模型会不会撒谎」，在于**被检查的一方控制了检查器**；
+    而 prompt 里那句「漏报了，你的角色名会被当成超纲词退回来重写」是单边施压
+    ——多报没有代价，少报要挨一次重写，模型自然会多报。构造一下能把超纲率
+    从 26% 压到 7%，而界面上只会显示一个更好看的数字。
 
     断言写成「包含 / 不包含」而不是精确集合：没下载 CEFR-J 时会退回内置兜底表，
-    那张表只有两千来个高频词，screens 之类会被多判成超纲。
-    多判几个不影响这条要验的主张，写死集合反而让测试依赖运行环境
-    ——CI 上就是没有词表的。
+    那张表只有两千来个高频词，screens 之类会被多判成超纲。多判几个不影响这条
+    要验的主张，写死集合反而让测试依赖运行环境——CI 上就是没有词表的
+    （需要注意.md 第 17 条）。
     """
     text = "Meticulous work matters. Nora walked home. Ubiquitous screens filled Riverton."
-    got = offenders(text, names={"Nora", "Riverton"})
+    got = offenders(text)
     assert {"Meticulous", "Ubiquitous"} <= got, "句首生词必须被检出"
-    assert not ({"Nora", "Riverton"} & got), "声明过的人名不该被判成超纲词"
+    assert "Nora" in got, "只在句首露过面的名字，分不出是名字还是生词，照查"
+    assert "Riverton" not in got, "在句中以大写出现过——这是独立于模型的实据"
+
+    #  退回来重写一次，用户标一次「忽略」，从此不再犯——Lute 那个循环
+    assert "Nora" not in offenders(text, allow={"Nora"})
 
 
 def test_没声明人名时靠句中大写兜底():
@@ -69,8 +79,10 @@ def test_目标词不算超纲():
 
 
 def test_超纲率的分母不含专有名词():
-    r = cefr.scan("Maria walked home with London.", "B2", names={"Maria", "London"})
-    assert r["total_words"] == 3        # walked / home / with
+    """专有名词不是词汇，不该稀释分母。"""
+    r = cefr.scan("She walked home with Maria and London.", "B2")
+    assert r["total_words"] == 5        # She / walked / home / with / and
+    assert r["offenders"] == []
 
 
 # --------------------------------------------------------------- 词形还原
