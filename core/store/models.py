@@ -24,6 +24,26 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def as_utc(dt: datetime | None) -> datetime | None:
+    """给要下发到前端的时间补回 UTC 标记。
+
+    存进去的是 UTC（utcnow()），但 SQLite 的 DateTime 列**不保留 tzinfo**，
+    读出来是 naive 的。naive 的 isoformat() 长这样：`2026-08-31T15:31:39`，
+    不带偏移量——而 ES 规范规定，不带偏移量的 date-time 形式按**本地时间**解释。
+    于是 `new Date()` 又把它当本地时间读了一遍，界面上每个时间都差一个时区：
+    东八区差 8 小时，凌晨生成的文章连日期都会退到前一天。
+
+    为什么没人报：差多少取决于用户在哪个时区，而唯一能发现它的办法是
+    「记得自己到底几点点的生成」。CI 跑在 UTC 上，差值是 0，测试也照样绿。
+
+    两种输入都要吃：库里读出来的是 naive（按 UTC 解释），本次会话新建的对象
+    带 aware（expire_on_commit=False，见 delete_article 上面那段注释）。
+    """
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
 class Base(DeclarativeBase):
     pass
 

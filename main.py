@@ -23,6 +23,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from core import settings
 from core.lexicon import cefr
@@ -42,6 +43,18 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Word Learning", docs_url="/api/docs", lifespan=lifespan)
+
+# 只接受以回环名字发来的请求。
+#
+# 服务只监听 127.0.0.1，听上去已经够了——但那挡不住 DNS rebinding：
+# 攻击者把自己的域名解析到 127.0.0.1，浏览器就认为那是同源，于是你访问的
+# 任意一个网页都能读走整个文库和词库、删文章、以及**发起生成把你的额度烧掉**。
+# 同源策略在这里不设防，正是因为「同源」已经被 DNS 骗过去了。
+#
+# 代价这边是零：本机自用的正常入口只有 127.0.0.1 和 localhost，
+# 一行配置不改变任何用户可见的行为；而攻击者控制不了这两个名字。
+# Host 头里的端口会被中间件自己切掉，所以换端口（_pick_port）不受影响。
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 app.mount("/static", StaticFiles(directory=str(ROOT / "web" / "static")), name="static")
 app.include_router(settings_router)
 app.include_router(article_router)

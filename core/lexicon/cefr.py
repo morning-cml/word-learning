@@ -110,12 +110,37 @@ def vocabulary() -> set[str]:
 
 
 def level_of(word: str) -> str | None:
-    """查一个词的 CEFR 等级，自动尝试词形还原。查不到返回 None。"""
+    """查一个词的 CEFR 等级，自动尝试词形还原。查不到返回 None。
+
+    候选里命中多个时取**最容易的那一档**，不是第一个命中的。
+
+    原来是「第一个命中就返回」，而 lemma_candidates 把词本身排在最前面，
+    于是**屈折形自己也是词条时，它就把原形挡住了**：
+
+        Standing → 命中 standing（C2，名词「地位」），A1 的 stand 轮不到
+        cones    → 命中 con（C1），cone 轮不到
+
+    这不是小数点问题：check_paragraph 会据此判 too_hard，拿一次修复调用
+    去要求模型「把 Standing 换成 CEFR B2 以内的说法」——花钱把一段本来
+    合格的文章改坏，而界面上只显示「第 N 段校验未过」。
+
+    取最容易的那一档，和 _load() 里「同一个词有多条词性记录时取最容易的
+    那一级」是同一条规矩：这把标尺要回答的是「读者读不读得下去」，
+    只要这个词形有一种读者认得的读法，他就读得下去。
+
+    代价量过（8653 条词表）：518 个词条判定变松，71 个越过 B2 线。
+    绝大多数是对的——reluctantly ← reluctant、standing ← stand、trying ← try、
+    revealing ← reveal 这类叙事文里的高频词。只有三四个是过度还原：
+    batter ← bat、charter ← chart、wares ← war、flatter ← flat。
+    被修正的是高频词，被放松的是低频词，这个交换划算；残留的那几个
+    记在 需要注意.md 第 4c 条里。
+
+    min 遇到并列取先出现的，而 lemma_candidates 把词本身排在最前——
+    等级一样时仍然以词本身为准，行为不变。
+    """
     table = _load()[0]
-    for cand in lemma_candidates(word):
-        if cand in table:
-            return table[cand]
-    return None
+    hits = [table[cand] for cand in lemma_candidates(word) if cand in table]
+    return min(hits, key=lambda lv: LEVEL_INDEX[lv]) if hits else None
 
 
 def resolve(word: str) -> str:
@@ -152,12 +177,32 @@ def level_counts() -> dict[str, int]:
     return out
 
 
+def normalize_level(value: object, fallback: str = "B2") -> str:
+    """把外面传进来的用词上限收敛成 LEVELS 里的一个。
+
+    认不出来就退回 fallback，而不是让它一路走到 within()。原来那里查不到时
+    取的是**最宽松**的一档，于是一个 `b2`、一个尾随空格、或者
+    settings.local.json 里留下的一个旧值，就能让整把难度标尺静默失效——
+    界面上写着 B2，实际按 C2 放行。实测同一段 C2 堆砌文本：
+    传 'B2' 判出 13 个超纲词，传 'b2' 只判出 11 个。
+
+    「界面说的」和「实际拦的」不一致，正是这个项目里用户没法自己发现的那类错：
+    能判断「这篇文章的用词是不是超了 B2」的人，本来就不需要这个功能。
+    """
+    text = value.strip().upper() if isinstance(value, str) else ""
+    return text if text in LEVEL_INDEX else fallback
+
+
 def within(word: str, max_level: str) -> bool:
     """该词是否在 max_level 及以下。查不到等级一律视为超纲。"""
     lv = level_of(word)
     if lv is None:
         return False
-    return LEVEL_INDEX[lv] <= LEVEL_INDEX.get(max_level, len(LEVELS) - 1)
+    # 认不出来的上限按**最严**算（A1），不是最宽松。调用方本该先过
+    # normalize_level，所以这条分支正常走不到；真走到了，宁可整段都判超纲、
+    # 让修复循环当场炸出来，也不要安安静静地把标尺放到最宽——
+    # 后者没有任何人会发现，而这正是「把沉默的失败换成可见的失败」那条。
+    return LEVEL_INDEX[lv] <= LEVEL_INDEX.get(max_level, 0)
 
 
 def scan(text: str, max_level: str, *, allow: set[str] | None = None,

@@ -14,10 +14,24 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client(temp_db):
+def client(temp_db, tmp_path, monkeypatch):
+    """接口层的测试客户端。
+
+    除了把库换成临时的（temp_db），**设置文件也必须换掉**。conftest 里那条
+    「不碰用户的库」同样适用于 config/settings.local.json：它装着 API Key，
+    而 POST /api/settings 是会真写进去的——一条测试跑完，用户存的用词上限
+    就被改成了测试用的那个值，而且没有任何地方会说一声。
+    这个文件和 data/app.db 是本机仅有的两份不可再生状态，两份都得隔离。
+    """
+    from core import settings                                # noqa: PLC0415
+
+    monkeypatch.setattr(settings, "SETTINGS_PATH", tmp_path / "settings.local.json")
     import main
 
-    return TestClient(main.app)
+    # base_url 必须是回环名字：应用只认 127.0.0.1 / localhost（防 DNS rebinding），
+    # TestClient 默认发的 Host 是 testserver，会被中间件挡成 400。
+    # 把 testserver 加进白名单更省事，但那等于为了测试在生产配置里开个口子。
+    return TestClient(main.app, base_url="http://127.0.0.1")
 
 
 # ------------------------------------------------------------------- 页面
@@ -103,6 +117,113 @@ def test_文章列表带线索比(client, temp_db):
 
     row = client.get("/api/articles").json()["articles"][0]
     assert row["clue"] == "2/3"
+
+
+def test_下发的时间带时区标记(client, temp_db):
+    """不带偏移量的 ISO 串会被前端读成本地时间，而存的是 UTC。
+
+    ES 规范：不带偏移量的 date-time 形式按**本地时间**解释。于是
+    `2026-08-31T15:31:39` 这个 UTC 时刻被 new Date() 又当本地时间读一遍，
+    界面上每个时间都差一个时区——东八区差 8 小时，凌晨生成的文章
+    连日期都会退到前一天。
+
+    唯一能发现它的办法是「记得自己到底几点点的生成」，所以没人会来报。
+    而 CI 跑在 UTC 上差值是 0——断言必须盯「有没有偏移量」这件事本身，
+    不能去比时刻，否则这条测试在 CI 上永远绿。
+    """
+    from datetime import datetime, timedelta, timezone   # noqa: PLC0415
+
+    from tests.test_store import DOC, META               # noqa: PLC0415
+
+    with temp_db.session() as s:
+        art = temp_db.save_article(s, DOC, META)
+        stored = art.created_at
+
+    for iso in (client.get("/api/articles").json()["articles"][0]["created_at"],
+                client.get(f"/api/articles/{art.id}").json()["created_at"]):
+        parsed = datetime.fromisoformat(iso)
+        assert parsed.tzinfo is not None, f"{iso} 没有时区标记，前端会当本地时间读"
+        assert parsed.utcoffset() == timedelta(0), "库里存的是 UTC，标记也该是 UTC"
+        naive = stored.replace(tzinfo=None) if stored.tzinfo else stored
+        assert parsed.astimezone(timezone.utc).replace(tzinfo=None) == naive
+
+
+def test_as_utc_对三种输入都不出错():
+    """库里读出来的是 naive，本次会话新建的对象带 aware，还可能是 None。"""
+    from datetime import datetime, timedelta, timezone   # noqa: PLC0415
+
+    from core.store.models import as_utc                 # noqa: PLC0415
+
+    assert as_utc(None) is None
+    naive = datetime(2026, 8, 31, 15, 31, 39)
+    assert as_utc(naive).isoformat() == "2026-08-31T15:31:39+00:00"
+    aware = datetime(2026, 8, 31, 23, 31, 39, tzinfo=timezone(timedelta(hours=8)))
+    assert as_utc(aware).utcoffset() == timedelta(0)
+    assert as_utc(aware).hour == 15
+
+
+def test_设置接口拒绝认不出来的用词上限(client):
+    """和 active_provider 同等对待。
+
+    存进去一个认不出来的值，cefr.within 会把标尺放到最宽松那一档，
+    往后每一次生成都静默失效——界面上写着 B2，实际按 C2 放行。
+    """
+    assert client.post("/api/settings", json={"level": "B1"}).status_code == 200
+    for bad in ("b2", "B2 ", "Z9", "中级"):
+        r = client.post("/api/settings", json={"level": bad})
+        assert r.status_code == 400, f"{bad!r} 不该被存下去"
+
+
+@pytest.mark.parametrize("host", ["evil.example.com", "attacker.test", "wordlearning.cn"])
+def test_只认回环主机名(client, host):
+    """挡的是 DNS rebinding。
+
+    服务只监听 127.0.0.1 挡不住它：攻击者把自己的域名解析到 127.0.0.1，
+    浏览器就认为那是同源，于是你访问的任意一个网页都能读走整个文库和词库、
+    删文章、以及发起生成把你的额度烧掉——同源策略在这里不设防，
+    因为「同源」已经被 DNS 骗过去了。
+    """
+    for path, method in [("/api/articles", client.get), ("/api/words", client.get),
+                         ("/api/status", client.get), ("/", client.get)]:
+        r = method(path, headers={"Host": host})
+        assert r.status_code == 400, f"{path} 放进来了一个伪造的 Host"
+
+    r = client.request("DELETE", "/api/articles/1", headers={"Host": host})
+    assert r.status_code == 400
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "127.0.0.1:8137", "localhost:54321"])
+def test_正常入口不受影响(client, host):
+    """端口由 _pick_port 现挑，所以带不带端口、哪个端口都得放行。"""
+    assert client.get("/api/status", headers={"Host": host}).status_code == 200
+
+
+def test_删除接口给得出代价(client, temp_db):
+    from tests.test_store import DOC, META      # noqa: PLC0415
+
+    with temp_db.session() as s:
+        art = temp_db.save_article(s, DOC, META)
+
+    r = client.get(f"/api/articles/{art.id}/impact")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["contexts"] > 0
+    assert set(body) == {"contexts", "words", "orphaned"}
+    assert client.get("/api/articles/999999/impact").status_code == 404
+
+
+def test_删除如实说留没留下快照(client, temp_db):
+    """备份悄悄失败比没有备份更糟：用户以为自己还有退路。"""
+    from tests.test_store import DOC, META      # noqa: PLC0415
+
+    with temp_db.session() as s:
+        art = temp_db.save_article(s, DOC, META)
+
+    body = client.delete(f"/api/articles/{art.id}").json()
+    assert body["ok"] is True
+    assert body["backup"]["made"] is True
+    assert body["backup"]["name"].endswith(".before-delete.db")
+    assert body["backup"]["error"] == ""
 
 
 def test_历史耗时给出每次调用的中位数(client, temp_db):

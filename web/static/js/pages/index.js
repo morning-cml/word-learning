@@ -103,9 +103,12 @@ const EVENT_HANDLERS = {
   paragraph: (ev, ui) => {
     const audits = ev.paragraph?.audits || [];
     const detail = audits.map((a) => `${a.lemma}=${a.strength}`).join('，');
+    // 走到这里还有词不是 strong，说明补线索那两轮也没救回来——这一段里
+    // 那几个词读完猜不出意思，等于白读。原先这个判断算出来了却没用
+    // （两个分支都返回空串），于是它和一段全 strong 的长得一模一样。
     const weak = audits.some((a) => a.strength !== 'strong');
     ui.tl.settle();
-    ui.tl.line(`第 ${ev.index} 段完成`, detail, weak ? '' : '');
+    ui.tl.line(`第 ${ev.index} 段完成`, detail, weak ? 'bad' : '');
   },
 
   retry: (ev, ui) => {

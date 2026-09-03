@@ -172,8 +172,9 @@ article.doc h1 {
    跟着变，而 lockHeights() 锁进去的 min-height 是按旧宽度算的——一开面板
    整篇文章的高度就全错了，而那正是 lockHeights 存在的理由。transform 不触发重排。
 
-   1240px 以下不推：再推正文左边就贴到窗口边上了，那里本来也没有富余空间，
-   盖住反而是对的（手机上面板本来就是 92vw 的抽屉）。 */
+   1000px 以下不推（下面那条媒体查询的门槛）：再推正文左边就贴到窗口边上了，
+   那里本来也没有富余空间，盖住反而是对的（手机上面板本来就是 92vw 的抽屉）。
+   再往下 clamp 自己也会归零——栏宽 760 时视口窄于约 808px，第三个值就变负了。 */
 @media (min-width: 1000px) {
   .reader-body { transition: transform .22s var(--ease); }
   body.panel-open .reader-body {

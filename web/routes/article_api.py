@@ -21,7 +21,7 @@ from core.llm.client import LLM
 from core.provider import registry
 from core.provider.base import ProviderError
 from core.store import db
-from core.store.models import STATUS_LABELS
+from core.store.models import STATUS_LABELS, as_utc
 from tasks.article.task import (
     MAX_PARAGRAPHS,
     MAX_WORDS,
@@ -150,7 +150,8 @@ def _generate(payload: dict, out: queue.Queue, cancel: threading.Event) -> None:
         cfg = settings.load()
         provider_id = payload.get("provider") or cfg.get("active_provider") or "deepseek"
         model = payload.get("model") or settings.active(provider_id)[1]
-        level = payload.get("level") or cfg.get("level") or "B2"
+        # 在这里也收敛一次：入库 meta 里记的那一档必须和管线实际执行的那一档相同
+        level = cefr.normalize_level(payload.get("level") or cfg.get("level"))
         key = settings.api_key(provider_id)
         if not key:
             raise ValueError(f"{provider_id} 还没有配置 API Key，请先去设置页填上")
@@ -239,7 +240,8 @@ def list_articles() -> dict:
                     "word_count": (a.stats or {}).get("word_count", 0),
                     # 线索强度是这个应用的头号指标，文库列表里也该一眼看得到
                     "clue": _clue_ratio(a.stats or {}),
-                    "created_at": a.created_at.isoformat() if a.created_at else "",
+                    # 同 article_to_doc：不带偏移量的 ISO 串会被 new Date() 当本地时间
+                    "created_at": as_utc(a.created_at).isoformat() if a.created_at else "",
                 }
                 for a in rows
             ]
@@ -255,12 +257,31 @@ def read_article(article_id: int) -> dict:
         return db.article_to_doc(article)
 
 
+@router.get("/articles/{article_id}/impact")
+def deletion_impact(article_id: int) -> dict:
+    """删这篇会连带丢掉什么。确认删除之前拿它把代价摆出来。
+
+    文章能重新生成，累计语境不能——而那个「删除」按钮从来没说过它会
+    连着语境一起删。`orphaned` 里的词只在这一篇里出现过，删了就等于从没学过。
+    """
+    with db.session() as s:
+        impact = db.deletion_impact(s, article_id)
+        if impact is None:
+            raise HTTPException(404, "文章不存在")
+        return impact
+
+
 @router.delete("/articles/{article_id}")
 def delete_article(article_id: int) -> dict:
     with db.session() as s:
         if not db.delete_article(s, article_id):
             raise HTTPException(404, "文章不存在")
-    return {"ok": True}
+    # 删除前那次留档到底成没成，要如实说。悄悄失败比没有备份更糟：
+    # 用户以为自己还有退路，等到需要它那天才发现没有。
+    snap = db.last_delete_backup()
+    return {"ok": True, "backup": {"made": bool(snap.get("made")),
+                                   "name": snap.get("latest", ""),
+                                   "error": "" if snap.get("ok", True) else snap.get("error", "")}}
 
 
 @router.get("/words/{lemma}")

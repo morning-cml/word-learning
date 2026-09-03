@@ -2,6 +2,22 @@
 setlocal EnableDelayedExpansion
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
+rem cd 失败不会让批处理停下来——它会**接着在原来的目录里跑**。双击时那通常是
+rem System32，于是下面会往那里建 .venv、找不到 requirements.txt，报出来的错
+rem 和真正的原因（路径）毫无关系。两种常见的失败法，都不报错：
+rem   · 路径里有感叹号。上一行开了 EnableDelayedExpansion，感叹号会被吃掉，
+rem     实测 "danci!xuexi" 下 cd 直接失败，%CD% 还停在 C:\Windows。
+rem   · 从网络路径运行（\\服务器\共享）。cmd 不支持把 UNC 当工作目录。
+rem 拿一个必然存在的项目文件当判据，比逐个去猜原因可靠。
+if not exist "requirements.txt" (
+    echo.
+    echo [错误] 没能切换到项目目录，现在还在 "%CD%"。
+    echo        最常见的原因是项目路径里带了感叹号，其次是从网络共享上运行。
+    echo        把整个文件夹挪到一个不带感叹号的本地路径下，再双击一次。
+    echo.
+    pause
+    exit /b 1
+)
 title Word Learning
 
 rem ======================================================================

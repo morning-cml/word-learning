@@ -71,7 +71,14 @@ class OpenAICompatProvider:
                 self._explain(r.status_code), status=r.status_code, body=r.text[:500]
             )
         models = self._body(r).get("data") or []
-        return [m.get("id", "") for m in models if isinstance(m, dict) and m.get("id")]
+        # 只收字符串 id。这个函数对外声明返回 list[str]，而调用方拿它去做
+        # `model in ids`、`"、".join(ids[:5])`——后者撞上一个数字 id 抛的是
+        # TypeError，不是 ProviderError，于是四层检验的 L1 会整个崩掉、
+        # 后面三层一层都跑不到（和 _body 那条注释说的是同一件事：
+        # 这个类对外的约定是「任何失败都变成一个带上下文的 ProviderError」）。
+        # 非字符串的 id 本来也当不了模型名，留着没有用处。
+        return [m["id"] for m in models
+                if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"]]
 
     def chat(
         self,

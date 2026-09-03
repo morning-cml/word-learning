@@ -87,7 +87,10 @@ class LLM:
                 if exc.status and exc.status < 500 and exc.status != 429:
                     raise
                 self._emit("retry", attempt=attempt, reason=str(exc))
-                time.sleep(min(2**attempt, 8))
+                # 最后一次已经失败了，退避没有下一次可退——原来这里照睡不误，
+                # 等于把用户看到报错的时间白白往后推 8 秒。
+                if attempt < self.max_retries:
+                    time.sleep(min(2**attempt, 8))
                 continue
             self.usage.add(res)
             return res

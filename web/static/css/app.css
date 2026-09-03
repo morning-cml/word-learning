@@ -279,6 +279,23 @@ button.chip { cursor: pointer; }
 .table .num { font-family: var(--mono); font-size: 13px; color: var(--muted); }
 .table-scroll { overflow-x: auto; }
 
+/* 删除的二次确认。删文章会连着累计语境一起删，而那是一次次阅读攒出来的、
+   删了补不回来——原来一次点击就没了，按钮平时还是隐形的。
+   确认框放在标题那一格里：操作格是 .tight（宽度贴着内容），往里塞两个按钮
+   会把整列撑宽，一行进入确认态、整张表跟着跳。 */
+.table tbody tr.arming { background: var(--bad-soft); }
+/* 用 visibility 而不是 display：位置留着，列宽才不会跳 */
+.table tbody tr.arming .del { visibility: hidden; }
+.del-warn {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2);
+  margin-top: var(--sp-2); padding: 8px 10px;
+  border: 1px solid var(--bad); border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.del-warn[hidden] { display: none; }
+.del-cost { flex: 1 1 240px; font-size: 12.5px; line-height: 1.55; color: var(--text); }
+.del-cost b { color: var(--bad); font-family: var(--mono); }
+
 /* ============================== toast ============================== */
 
 #toasts {
@@ -379,12 +396,9 @@ button.chip { cursor: pointer; }
 .word-row { cursor: pointer; }
 .word-row .lemma { font-family: var(--serif); font-size: 16px; font-weight: 600; }
 .word-row .gloss { color: var(--muted); font-size: 13px; }
-.meter { display: inline-flex; gap: 2px; vertical-align: 1px; }
-.meter i {
-  width: 5px; height: 5px; border-radius: 50%;
-  background: var(--line); display: block;
-}
-.meter i.on { background: var(--accent); }
+/* .meter 的样式在下面「掌握程度」那一段。这里原先还有一份旧的（5px 圆点），
+   同选择器、同优先级、在前面，每一条都被后面那份逐条盖掉——改它不会有任何
+   反应，也不会报错。同一个选择器写两处就是这种静默失效，删掉早的那份。 */
 
 /* ============================== 难度等级徽章 ==============================
    CEFR 是这个应用的核心数据维度——整把难度标尺、超纲检测、用词上限

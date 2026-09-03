@@ -18,6 +18,24 @@ class ProviderError(RuntimeError):
         self.body = body
 
 
+class UnknownProvider(KeyError):
+    """配置里没有这一家。
+
+    仍然是 KeyError 的子类，已有的 `except KeyError` 一行都不用改。
+    单开一个类只为改 `str()`：`KeyError.__str__` 返回的是 `repr(args[0])`，
+    而这个异常的四个出口（设置页的三个接口、生成时的错误事件）都是直接把
+    `str(exc)` 交给用户看的——于是界面上出现的是一句被单引号裹住的中文：
+    `'未知的模型提供商：kimi'`。这几个出口存在的理由恰恰是「显示人话」
+    （见 ProviderError 上面那句），一个 repr 的引号就把它破掉了。
+
+    重现路径不用手改配置：providers.yaml 里删掉或改名一家，而
+    settings.local.json 里存的 active_provider 还指着它，下一次生成就会走到。
+    """
+
+    def __str__(self) -> str:
+        return str(self.args[0]) if self.args else ""
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     id: str

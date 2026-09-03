@@ -139,6 +139,44 @@ def test_第一句完整之后每个截断点都救得回来():
         assert got["sentences"][0] == PARAGRAPH["sentences"][0], text[:i]
 
 
+@pytest.mark.parametrize("frag", [
+    "{",
+    "[",
+    '{"sentences": [',
+    '{"audits": [',
+    '{"sentences":[{',
+    '{"sentences": [{"en": "',
+])
+def test_补出来的空壳不算救回来(frag):
+    """截断点落在第一个值出现之前时，补齐只会造出一个空文档。
+
+    实际拿到过的三种：`{` → `{}`、`{"sentences": [` → `{"sentences": []}`、
+    `{"sentences":[{` → `{"sentences": [{}]}`——最后一种还凭空多造了一句，
+    直接违反这一层自己那条「宁可少一句，也不要凭空多一句模型没写的」。
+
+    代价不是「解析失败」这么轻，而是**沉默地花钱**：审计那次调用被截在开头时，
+    `{"audits": []}` 会被 audit_clues 读成「所有词都没有线索」，于是一段本来
+    合格的文章要挨两轮补线索改写，还可能被改坏，界面上只显示一句
+    「第 N 段线索不足」。抛出去让 client.py 重试才是对的。
+    """
+    with pytest.raises(jsonfix.JsonParseError):
+        jsonfix.loads(frag)
+
+
+@pytest.mark.parametrize("frag,expect", [
+    # 有一个字是模型真写的，就不能因为「其余是空的」把它一起扔掉
+    ('{"a": 1, "b": ',                 {"a": 1}),
+    ('{"sentences": [{"en": "x"',      {"sentences": [{"en": "x"}]}),
+    ('{"audits": [{"lemma": "tedious", "strength": ',
+     {"audits": [{"lemma": "tedious"}]}),
+    ('{"a": 0}',                       {"a": 0}),      # 0 / false 是内容，不是空
+    ('{"a": false}',                   {"a": False}),
+])
+def test_救回了内容就照常返回(frag, expect):
+    """上一条那道闸只拦「一个字都没救到」，不能顺手把救到一点的也扔了。"""
+    assert jsonfix.loads(frag) == expect
+
+
 def test_没被截断的输入不进第_4_层():
     """第 4 层只负责救残缺的东西。对完整输入还去动它，
     等于给一条本来就对的路径加了一个改坏它的机会。"""

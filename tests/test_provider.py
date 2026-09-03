@@ -102,6 +102,47 @@ def test_正常响应照常解析(respond):
     assert res.total_tokens == 12
 
 
+# ------------------------------------------------------- 模型列表的元素形状
+
+def test_模型_id_不是字符串时不漏出_TypeError(respond):
+    """这个函数声明返回 list[str]，调用方就照着这个用。
+
+    四层检验的 L1 会把它拼进一句话：`"、".join(ids[:5])`。列表里混进一个
+    数字或对象，抛的是 TypeError——不是 ProviderError，谁都没接，
+    于是整次检验变成 HTTP 500，后面三层一层都跑不到。而这恰好只在
+    base_url 指到了某个奇怪的代理上时才发生，也就是最需要它说人话的场合。
+    """
+    respond(lambda req: httpx.Response(200, json={"data": [
+        {"id": "deepseek-v4-pro"},
+        {"id": 123},
+        {"id": {"name": "weird"}},
+        {"id": None},
+        {"no_id": "x"},
+        "不是对象",
+    ]}))
+
+    ids = _provider().list_models()
+    assert ids == ["deepseek-v4-pro"]
+    assert all(isinstance(i, str) for i in ids)
+    "、".join(ids[:5])          # L1 真正会做的事，不能抛
+
+
+# ------------------------------------------------------------ 不认识的提供商
+
+def test_未知提供商的报错不带引号():
+    """这几个出口都是直接把 str(exc) 交给用户看的。
+
+    KeyError.__str__ 返回的是 repr(args[0])，于是设置页上显示的是
+    `'未知的模型提供商：kimi'`——中文被一对单引号裹着。这几个出口存在的
+    理由恰恰是「显示人话」。仍然要是 KeyError 的子类，调用方那几处
+    `except KeyError` 一行都不该改。
+    """
+    with pytest.raises(KeyError) as err:
+        registry.get_spec("不存在的一家")
+    assert str(err.value) == "未知的模型提供商：不存在的一家"
+    assert "'" not in str(err.value)
+
+
 # ------------------------------------------------------------------ 状态码翻译
 
 @pytest.mark.parametrize("status,keyword", [

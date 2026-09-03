@@ -5,6 +5,7 @@ from fastapi import APIRouter, Body, HTTPException
 from fastapi.concurrency import run_in_threadpool
 
 from core import health, settings
+from core.lexicon import cefr
 from core.provider import registry
 from core.provider.base import ProviderError
 
@@ -23,6 +24,10 @@ def write_settings(patch: dict = Body(...)) -> dict:
             registry.get_spec(patch["active_provider"])
         except KeyError as exc:
             raise HTTPException(400, str(exc)) from exc
+    # level 和 active_provider 同等对待：存进去一个认不出来的值，
+    # 难度标尺会在往后每一次生成里静默失效，而且没有任何地方会报出来。
+    if patch.get("level") and patch["level"] != cefr.normalize_level(patch["level"], ""):
+        raise HTTPException(400, f"用词上限必须是 {'、'.join(cefr.LEVELS)} 之一")
     settings.save(patch)
     return settings.public_view()
 

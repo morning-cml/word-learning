@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from .base import Capabilities, ModelSpec, ProviderSpec, Quirks, Reasoning
+from .base import Capabilities, ModelSpec, ProviderSpec, Quirks, Reasoning, UnknownProvider
 from .openai_compat import OpenAICompatProvider
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "providers.yaml"
@@ -81,7 +81,7 @@ def load_specs() -> dict[str, ProviderSpec]:
 def get_spec(provider_id: str) -> ProviderSpec:
     specs = load_specs()
     if provider_id not in specs:
-        raise KeyError(f"未知的模型提供商：{provider_id}")
+        raise UnknownProvider(f"未知的模型提供商：{provider_id}")
     return specs[provider_id]
 
 

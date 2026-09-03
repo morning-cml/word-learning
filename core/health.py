@@ -19,7 +19,6 @@ L4 是后加的，理由值得写下来：这个产品的全部价值判定压�
 """
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
@@ -161,8 +160,8 @@ def check(provider_id: str, model: str, api_key: str) -> dict[str, Any]:
             first = sents[0]
             l3["detail"] = (
                 f"产出 {len(sents)} 句。样例 → "
-                f"EN: {(first.get('en') or '')[:70]} / "
-                f"ZH: {(first.get('zh') or '')[:40]}"
+                f"EN: {_field(first, 'en')[:70]} / "
+                f"ZH: {_field(first, 'zh')[:40]}"
             )
     except (ProviderError, jsonfix.JsonParseError) as exc:
         l3["error"] = str(exc)
@@ -245,6 +244,23 @@ def _sentences(doc: Any) -> list[dict]:
     return [s for s in items if isinstance(s, dict)] if isinstance(items, list) else []
 
 
+def _field(sent: Any, key: str) -> str:
+    """安全地取一句里的 en / zh。非字符串一律当空。
+
+    上一轮守住的是**容器**的形状（见 _sentences），值没有守：模型把 en 写成
+    对象、把 zh 写成数字或数组都出现过——`tasks/article/schema.py` 的 `_text`
+    就是专为这件事存在的，而这里另起了一套取值方式，于是那道防线没跟过来。
+
+    `(s.get("en") or "").strip()` 撞上这种值抛的是 AttributeError，
+    它不在 check() 里那个 except 的捕获范围内，会一路冒到接口层变成 HTTP 500：
+    用户看到的是「检验请求失败」，而不是「任务验收没过、原因是 en 不是字符串」，
+    并且**最要紧的 L4 一次都跑不到**。检验本身在它该报告问题的时候崩掉，
+    等于这一层不存在——和 _sentences 上面那段说的是同一件事。
+    """
+    value = sent.get(key) if isinstance(sent, dict) else None
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _audit(doc: Any) -> list[str]:
     """L3 的验收标准——这几条不过，这个模型就干不了我们的活。"""
     issues: list[str] = []
@@ -254,14 +270,14 @@ def _audit(doc: Any) -> list[str]:
     if not isinstance(sents, list) or not sents:
         return ["缺少 sentences 数组"]
 
-    missing_zh = sum(1 for s in sents if not (isinstance(s, dict) and (s.get("zh") or "").strip()))
-    missing_en = sum(1 for s in sents if not (isinstance(s, dict) and (s.get("en") or "").strip()))
+    missing_zh = sum(1 for s in sents if not _field(s, "zh"))
+    missing_en = sum(1 for s in sents if not _field(s, "en"))
     if missing_en:
         issues.append(f"{missing_en} 句英文为空")
     if missing_zh:
         issues.append(f"{missing_zh} 句缺中文——句级对齐会直接崩掉")
 
-    text = " ".join((s.get("en") or "").lower() for s in sents if isinstance(s, dict))
+    text = " ".join(_field(s, "en").lower() for s in sents)
     missed = [w for w in ("river", "promise", "return") if w[:5] not in text]
     if missed:
         issues.append("目标词未命中：" + "、".join(missed))

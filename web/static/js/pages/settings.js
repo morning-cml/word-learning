@@ -81,8 +81,18 @@ async function drawData() {
       放在 <code>data/backups/</code>，每次启动前自动留档。<br>
       <span class="hint">文章可以重新生成，掌握程度和累计语境不能——快照留的主要是后者。</span>
     </div>`);
-  } else {
+  } else if (!b.protected) {
     parts.push('<div class="note" style="margin-top:10px">还没有数据可备份。生成第一篇文章后会自动留档。</div>');
+  }
+
+  // 删除前留的那条线单独说。例行快照的窗口是「最近 5 次有写入的启动」——
+  // 误删一篇之后再生成 5 篇就把它挤掉了，而那正是唯一想找回来的一份。
+  if (b.protected) {
+    parts.push(`<div class="note ok" style="margin-top:10px">
+      另有 ${Number(b.protected)} 份<b>删除前</b>快照，走单独的轮换线，
+      例行快照再多也挤不掉它们。<br>
+      <span class="hint">删一篇文章会连着它攒下的语境一起删，而语境是补不回来的。</span>
+    </div>`);
   }
   html($('#dataInfo'), parts.join(''));
 }

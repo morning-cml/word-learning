@@ -175,6 +175,75 @@ console.log('\n5. 文库页');
   check('标题链到阅读页', rows[0].querySelector('a[href^="/read/"]') !== null);
 }
 
+/* -------- 删除的二次确认 --------
+   删一篇会连着它攒下的语境一起删（Encounter 跟着 Sentence 级联走），
+   而那是一次次阅读攒出来的、删了补不回来。原来一次点击就没了，
+   按钮平时还是隐形的——整个应用里最不可逆的动作，阻力最小。 */
+{
+  const impact = { contexts: 5, words: 3, orphaned: ['nostalgia', 'scrutiny'] };
+  //  按路径形状打桩，不写死 id：夹具里的文章 id 不归这条测试管
+  const ctx = boot('library', { onFetch: (path) =>
+    path.endsWith('/impact') ? { ok: true, status: 200, json: async () => impact } : undefined });
+  const mod = await import(JS('pages/library.js'));
+  await mod.init({});
+
+  const tr = q(ctx, '#table tbody tr');
+  const id = tr.dataset.id;
+  tr.querySelector('.del').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  check('第一下不删', !ctx.calls.some((c) => c.method === 'DELETE'));
+  check('先问了这一篇的代价', ctx.calls.some((c) => c.path === `/api/articles/${id}/impact`));
+  const warn = tr.querySelector('.del-warn');
+  check('确认框出现', warn && !warn.hidden);
+  check('说清了要丢多少语境', /5/.test(warn.textContent) && /语境/.test(warn.textContent));
+  check('点名了只在这一篇里出现过的词',
+        /nostalgia/.test(warn.textContent) && /scrutiny/.test(warn.textContent));
+  check('确认框在标题那一格，不撑宽操作列', warn.closest('td') === tr.children[0]);
+
+  //  取消要能真的退出去
+  tr.querySelector('.cancel-del').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  check('取消后确认框收起', tr.querySelector('.del-warn').hidden);
+  check('取消之后仍然没有发删除请求', !ctx.calls.some((c) => c.method === 'DELETE'));
+
+  //  再点一次 → 确认 → 才真删
+  tr.querySelector('.del').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  tr.querySelector('.confirm-del').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  check('确认之后才发 DELETE',
+        ctx.calls.filter((c) => c.method === 'DELETE' && c.path === `/api/articles/${id}`).length === 1);
+}
+
+{
+  //  Esc 也要能退出去：确认态是个模式，得有一条不用找鼠标的出路
+  const ctx = boot('library', { onFetch: (path) => path.endsWith('/impact')
+    ? { ok: true, status: 200, json: async () => ({ contexts: 1, words: 1, orphaned: [] }) } : undefined });
+  const mod = await import(JS('pages/library.js'));
+  await mod.init({});
+  const tr = q(ctx, '#table tbody tr');
+  tr.querySelector('.del').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  check('Esc 之前是展开的', !tr.querySelector('.del-warn').hidden);
+  ctx.doc.dispatchEvent(new ctx.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  check('Esc 收起确认框', tr.querySelector('.del-warn').hidden);
+  check('Esc 之后没有发删除请求', !ctx.calls.some((c) => c.method === 'DELETE'));
+}
+
+{
+  //  代价算不出来（接口挂了）也得能删，只是如实说「说不清丢的是什么」
+  const ctx = boot('library', { onFetch: (path) =>
+    path.endsWith('/impact') ? { ok: false, status: 500, json: async () => ({}) } : undefined });
+  const mod = await import(JS('pages/library.js'));
+  await mod.init({});
+  const tr = q(ctx, '#table tbody tr');
+  tr.querySelector('.del').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  const warn = tr.querySelector('.del-warn');
+  check('算不出代价仍然给得出确认框', !warn.hidden && warn.querySelector('.confirm-del') !== null);
+  check('并且如实说没算出来', /没算出来|找不回来/.test(warn.textContent));
+}
+
 /* ============================ 设置页 ============================ */
 console.log('\n6. 设置页');
 {

@@ -129,6 +129,35 @@ def _repair_truncated(fragment: str) -> list[str]:
     return [fragment + "".join(reversed(stack)), *back]
 
 
+def _hollow(value: Any) -> bool:
+    """这份结果里有没有模型真写出来的东西。
+
+    只给第 4 层用。第 4 层只在输入被截断时才跑，所以「补齐之后一个字都没有」
+    只有一种可能：截断点落在第一个值出现之前，补出来的那几个括号是这一层
+    自己造的。照单收下就等于把「模型什么都没吐出来」变成「成功解析出一个
+    空文档」——那正是本模块第 5 层那句「空结果不算修好」要拦的东西
+    （见 需要注意.md 第 2 条），两层理应守同一条规矩。
+
+    实际会踩到的三种（都验证过）：
+        `{`                -> `{}`
+        `{"sentences": [`  -> `{"sentences": []}`
+        `{"sentences":[{`  -> `{"sentences": [{}]}`   ← 还凭空多造了一句
+    最后一种直接违反本层自己那条「宁可少一句，也不要凭空多一句模型没写的」。
+
+    代价不是「解析失败」这么轻。审计那次调用被截在开头时，拿回来的
+    `{"audits": []}` 会被 audit_clues 读成「所有词都没有线索」，于是一段
+    本来写得好好的文章要挨两轮补线索改写——白烧钱，还可能把它改坏，
+    而界面上只显示一句「第 N 段线索不足」。抛出去让 client.py 重试才是对的。
+    """
+    if isinstance(value, dict):
+        return all(_hollow(v) for v in value.values())
+    if isinstance(value, list):
+        return all(_hollow(v) for v in value)
+    if isinstance(value, str):
+        return not value.strip()
+    return value is None
+
+
 def loads(text: str) -> Any:
     """尽最大努力把模型输出解析成 Python 对象。"""
     if not text or not text.strip():
@@ -156,9 +185,12 @@ def loads(text: str) -> Any:
         for patched in _repair_truncated(cand):
             for attempt in (patched, _TRAILING_COMMA.sub(r"\1", patched)):
                 try:
-                    return json.loads(attempt)
+                    got = json.loads(attempt)
                 except json.JSONDecodeError:
                     continue
+                # 补出来是个空壳就不算救回来，换下一个候选（见 _hollow）
+                if not _hollow(got):
+                    return got
 
     # 第 5 层：整段语法修复。json_repair 是个按 JSON 文法走的解析器，
     # 能修上面四层修不了的一类东西——它们都在真实输出里出现过：

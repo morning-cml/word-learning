@@ -214,14 +214,45 @@ class ArticleTask(Task):
             prompts.audit_prompt(text, expected),
             purpose="structured", max_tokens=2500, json_schema=AUDIT_SCHEMA,
         ))
-        by_lemma = {a["lemma"].lower(): a for a in audits}
-        # 模型漏审的词按最坏情况处理，不能默认通过
-        for word in expected:
-            by_lemma.setdefault(
-                word.lower(),
-                {"lemma": word, "strength": "none", "clue": "", "why": "审计未覆盖该词"},
-            )
-        return [by_lemma[w.lower()] for w in expected]
+
+        # 把模型回的每条结论认领到某个目标词上。
+        #
+        # 原来是拿 lemma 做字符串相等。模型经常回一个屈折形——问它
+        # meticulous，它回 meticulously——于是这个词被当成「漏审」，
+        # 按最坏情况兜底成 none，接着发生的事一件比一件糟：
+        #   · 一段本来线索充分的段落挨两轮补线索改写（4 次多余调用，两分多钟），
+        #     而改写只可能让它变差；
+        #   · 结果面板把它报成「语境线索充分 0/1」——正好反了。
+        # 而线索强度是这个项目唯一用来自我监测的仪表（见 SENTENCE_SCAFFOLD
+        # 上面那段），仪表本身读反了，「错了会响」这条前提就不成立了。
+        #
+        # same_word 是这个项目对「这是不是同一个词」的既定判据，_appears 和
+        # cefr.scan 用的都是它。这里没有理由另立一套（见 需要注意.md 第 6 条）。
+        # 两遍：先让字面相同的认领完，再让屈折形去认剩下的——否则一个屈折形
+        # 可能抢走另一个词正好要用的那条。认领过的从池子里拿走，
+        # 一条结论只能算到一个词头上，不然 clue_strength 的分母会虚高。
+        picked: list[dict | None] = [None] * len(expected)
+        pool = list(audits)
+
+        def claim(match) -> None:
+            for i, word in enumerate(expected):
+                if picked[i] is not None:
+                    continue
+                for j, audit in enumerate(pool):
+                    if match(word, audit["lemma"]):
+                        picked[i] = pool.pop(j)
+                        break
+
+        claim(lambda word, lemma: word.lower() == lemma.lower())
+        claim(same_word)
+
+        # lemma 一律改回用户给的那个词：下游 save_article 是按目标词的 lemma
+        # 去 audits 里找线索的，留着模型的回声会挂不上，这一处语境就没有线索了。
+        return [
+            {**audit, "lemma": word} if audit else
+            {"lemma": word, "strength": "none", "clue": "", "why": "审计未覆盖该词"}
+            for word, audit in zip(expected, picked)
+        ]
 
     @staticmethod
     def weak_clues(audits: list[dict]) -> list[dict]:
@@ -231,7 +262,8 @@ class ArticleTask(Task):
 
     def run(self, llm: LLM, params: dict) -> Iterator[Event]:
         words: list[str] = [w for w in params.get("words", []) if w.strip()]
-        level: str = params.get("level", "B2")
+        # 收敛用词上限：认不出来的值会让 cefr.within 的标尺静默失效（见 normalize_level）
+        level: str = cefr.normalize_level(params.get("level"))
         allow = set(words)
         names: set[str] = set()      # 选题阶段声明的人名地名，见 cefr.scan
 
@@ -249,8 +281,27 @@ class ArticleTask(Task):
         planned = plan["paragraphs"]
         if not planned:
             planned = [{"focus": "", "words": words[i::n_para]} for i in range(n_para)]
+        over = len(planned) - MAX_PARAGRAPHS
+        if over > 0:
+            # MAX_PARAGRAPHS 一直只是 sizing() 的入参，从没拦过模型**真的回了几段**。
+            # 管线里其它每一处模型输出都做了归一和收敛（coerce_*、_assign_words），
+            # 唯独段数是照单全收的：模型不理会 prompt 回 40 段，这里就是 40 次写正文
+            # 加 40 次线索审计——顺风路径的 4 次调用变成 44 次、二十多分钟。
+            # 而且不会报错：前端进度条会自己把分母加大，看着只是「这篇比较久」。
+            # 砍掉多的部分是安全的：被砍段落里的目标词会被下面的 _assign_words
+            # 当成 forgotten 补回最后一段，一个词都不会掉。
+            planned = planned[:MAX_PARAGRAPHS]
 
         names = set(plan["names"])
+        if over > 0:
+            # 砍了就说一声。悄悄截断读起来和「模型本来就只规划了这么多段」
+            # 一模一样，而这两件事该让人分得开。
+            yield {
+                "type": "phase", "phase": "plan",
+                "message": f"模型规划了 {len(plan['paragraphs'])} 段，超出上限 "
+                           f"{MAX_PARAGRAPHS} 段，多出的 {over} 段已裁掉"
+                           "（词会并到最后一段，不会丢）",
+            }
         planned, dropped = self._assign_words(planned, words, plan["unplaced"])
         if dropped:
             yield {
@@ -351,7 +402,9 @@ class ArticleTask(Task):
                     para, problems = candidate, []
                     audits = self.audit_clues(llm, para, expected)
 
-            para = self._normalize(para, expected)
+            # 传全篇的 words 而不是本段的 expected：别的段落分到的词真的出现在
+            # 这一段里，那是一处货真价实的语境；而用户没要求学的词一律丢掉。
+            para = self._normalize(para, expected, words)
             para["problems"] = [p.kind for p in problems]
             para["audits"] = audits
             all_audits.extend(audits)
@@ -415,17 +468,53 @@ class ArticleTask(Task):
     # --------------------------------------------------------------- 后处理
 
     @staticmethod
-    def _normalize(para: dict, expected: list[str]) -> dict:
-        """校正模型给的 targets：surface 要真的出现在句子里。
+    def _normalize(para: dict, expected: list[str], wanted: list[str]) -> dict:
+        """校正模型给的 targets。做两件事，第二件是守住存储的。
 
-        不要求模型给字符位置——模型数字符位置经常错位；位置由前端按
-        surface 做词边界匹配自己算，稳得多。
+        一、surface 要真的出现在句子里。不要求模型给字符位置——模型数字符
+        位置经常错位；位置由前端按 surface 做词边界匹配自己算，稳得多。
+
+        二、**lemma 必须是用户这次真要学的词，并且归到用户给的那个拼写上。**
+        这一层原来是照单全收的：模型在 targets 里标什么，就往下走什么。
+        它有两个稳定的跑偏方向（_assign_words 上面那段已经点过第一个），
+        代价都直接落在 data/app.db 上——而那是这个应用唯一不可再生的资产：
+
+        · **自己往里加词。** 实测让它写 abandon / silence，它顺手把 shop、
+          spring 也标成了 target。这两个词于是有了自己的 Word 行和 Encounter，
+          进了词库、算进「累计词条」和「在多个语境中见过」——**这个应用
+          用来说明自己有用的那两个数字**。事后没有任何办法把它们和真正学过的
+          词分开。
+        · **把 lemma 回成派生形式。** 问它 abandon，它标 abandoned。
+          而 abandoned 自己就是 B2 词条，resolve() 归不回 abandon，
+          于是库里同时立着 abandon 和 abandoned 两条，同一个词的语境
+          从此分摊在两个词条下，越攒越散（需要注意.md 第 6b 条那个裂缝）。
+
+        两件事同一个根因，所以同一个判据解决：把模型标的 lemma 认领到
+        wanted 里的某个词上，认不上就丢掉。认领先比字面、再比 same_word——
+        后者是这个项目对「是不是同一个词」的既定判据，_appears、cefr.scan、
+        audit_clues 用的都是它。
+
+        wanted 传的是**全篇**的目标词，不是 expected（本段的）：一个分给第 3 段
+        的词真的出现在第 1 段里，那是一处货真价实的语境，不该丢。
+        丢掉的那些不必报给用户——用户没要求学它们，丢了什么也没少。
         """
+        canonical: dict[str, str] = {}
+        for word in wanted:
+            canonical.setdefault(word.lower(), word)
+
+        def claim(lemma: str) -> str | None:
+            """把模型标的 lemma 归到用户给的那个词上；不是这批词就返回 None。"""
+            hit = canonical.get(lemma.lower())
+            if hit is not None:
+                return hit
+            return next((w for w in canonical.values() if same_word(w, lemma)), None)
+
         for sent in para.get("sentences", []):
             en = sent.get("en") or ""
-            fixed = []
+            marks: list[tuple[str, str]] = []          # (归好的词, 它在这句里的形态)
+
             for tgt in sent.get("targets") or []:
-                lemma = (tgt.get("lemma") or "").strip()
+                lemma = claim((tgt.get("lemma") or "").strip())
                 if not lemma:
                     continue
                 surface = (tgt.get("surface") or "").strip()
@@ -434,15 +523,27 @@ class ArticleTask(Task):
                 ):
                     surface = _appears(lemma, en) or ""
                 if surface:
-                    fixed.append({"lemma": lemma.lower(), "surface": surface})
+                    marks.append((lemma, surface))
+
             # 模型漏标的，补上
-            marked = {t["lemma"] for t in fixed}
+            claimed = {lemma.lower() for lemma, _ in marks}
             for word in expected:
-                if word.lower() in marked:
+                if word.lower() in claimed:
                     continue
                 found = _appears(word, en)
                 if found:
-                    fixed.append({"lemma": word.lower(), "surface": found})
+                    marks.append((word, found))
+
+            # 按 (词, 形态) 去重：认领之后 abandon 和 abandoned 会归到同一个词上，
+            # 不去重就会在同一句里出现两条一模一样的标注。只按词去重不行——
+            # 同一句里同一个词的两种形态（abandoned / abandoning）都该各自高亮。
+            seen: set[tuple[str, str]] = set()
+            fixed: list[dict] = []
+            for lemma, surface in marks:
+                key = (lemma.lower(), surface.lower())
+                if key not in seen:
+                    seen.add(key)
+                    fixed.append({"lemma": lemma.lower(), "surface": surface})
             sent["targets"] = fixed
         return para
 

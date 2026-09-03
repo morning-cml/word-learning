@@ -18,6 +18,7 @@ from tasks.article.schema import (
     coerce_audits, coerce_glossary, coerce_paragraph, coerce_plan,
 )
 from tasks.article.task import (
+    MAX_PARAGRAPHS,
     MAX_WORDS,
     ArticleTask,
     estimated_words,
@@ -201,6 +202,161 @@ def test_补线索把机械校验搞坏就丢弃(fake_llm, happy_responses):
 
     assert doc["paragraphs"][0]["sentences"][0]["en"] == GOOD_PARAGRAPH["sentences"][0]["en"]
     assert stats["clue_fixes"] == 0        # 被丢弃的改写不计数
+
+
+def test_模型回了屈折形也认得出是同一个词(fake_llm, happy_responses):
+    """问它 abandon，它回 abandoned——不能因此当成「漏审」。
+
+    按字符串相等去认的话，这个词被兜底成 none，接着发生的事一件比一件糟：
+    一段本来线索充分的段落挨两轮补线索改写（4 次多余调用、两分多钟，
+    而改写只可能让它变差），结果面板还把它报成「语境线索充分 0/1」——正好反了。
+    而线索强度是这个项目唯一用来自我监测的仪表，仪表读反了，
+    「密度伤到线索会响」这条前提就不成立了。
+    """
+    happy_responses["audit"] = {"audits": [
+        {"lemma": "abandoned", "strength": "strong"},      # 过去分词
+        {"lemma": "Silences", "strength": "strong"},       # 大写 + 复数
+    ]}
+    llm = fake_llm(happy_responses)
+    _, stats, _ = run_pipeline(llm)
+
+    assert llm.calls.count("clue_fix") == 0, "本来就合格，不该去补线索"
+    assert stats["clue_strength"] == {"strong": 2, "weak": 0, "none": 0}
+    assert [a["lemma"] for a in stats["audits"]] == ["abandon", "silence"],         "lemma 要归回用户给的那个词，否则 save_article 挂不上线索"
+
+
+def test_一条结论只能算到一个词头上(fake_llm, happy_responses):
+    """认领必须是一对一的，否则 clue_strength 的分母会虚高。"""
+    happy_responses["audit"] = {"audits": [{"lemma": "abandoned", "strength": "strong"}]}
+    _, stats, _ = run_pipeline(fake_llm(happy_responses))
+    assert stats["clue_strength"] == {"strong": 1, "weak": 0, "none": 1}
+
+
+def test_完全对不上的结论仍按最坏情况处理(fake_llm, happy_responses):
+    """放宽认领判据不能顺手把「审计确实漏了」也放过去。"""
+    happy_responses["audit"] = {"audits": [{"lemma": "unrelated", "strength": "strong"}]}
+    _, stats, _ = run_pipeline(fake_llm(happy_responses))
+    assert stats["clue_strength"]["none"] == 2
+
+
+# ------------------------------------------------------- targets 的收敛
+
+#  这一组守的是 data/app.db。文章能重新生成，词条和累计语境不能——
+#  一个不该进去的词写进去了，事后没有任何办法把它和真正学过的词分开。
+
+def _marked(doc) -> list[tuple[str, str]]:
+    return [(t["lemma"], t["surface"])
+            for p in doc["paragraphs"] for s in p["sentences"] for t in s["targets"]]
+
+
+def test_模型自己加的词不许写进词库(fake_llm, happy_responses):
+    """让它写 abandon / silence，它顺手把 shop、spring 也标成了 target。
+
+    这两个词会拿到自己的 Word 行和 Encounter，进词库、算进「累计词条」和
+    「在多个语境中见过」——**这个应用用来说明自己有用的那两个数字**。
+    而它完全不报错：文章是好的，用户看到的是「生成完成」。
+    """
+    happy_responses["write"] = {"sentences": [{
+        **GOOD_PARAGRAPH["sentences"][0],
+        "targets": [
+            {"lemma": "abandon", "surface": "abandoned"},
+            {"lemma": "silence", "surface": "silence"},
+            {"lemma": "shop", "surface": "shop"},        # 模型自己加的
+            {"lemma": "spring", "surface": "spring"},    # 模型自己加的
+        ],
+    }]}
+    doc, _, _ = run_pipeline(fake_llm(happy_responses))
+    assert sorted({lemma for lemma, _ in _marked(doc)}) == ["abandon", "silence"]
+
+
+def test_模型把_lemma_回成派生形式也要归回原词(fake_llm, happy_responses):
+    """问它 abandon，它标 abandoned。
+
+    abandoned 自己就是 B2 词条，cefr.resolve 归不回 abandon，于是库里同时
+    立着两条，同一个词的语境从此分摊在两个词条下，越攒越散
+    （需要注意.md 第 6b 条那个裂缝）。
+    """
+    happy_responses["write"] = {"sentences": [{
+        **GOOD_PARAGRAPH["sentences"][0],
+        "targets": [{"lemma": "abandoned", "surface": "abandoned"},
+                    {"lemma": "Silences", "surface": "silence"}],
+    }]}
+    doc, _, _ = run_pipeline(fake_llm(happy_responses))
+    assert sorted({lemma for lemma, _ in _marked(doc)}) == ["abandon", "silence"]
+
+
+def test_别的段落分到的词出现在本段也算数():
+    """收敛的判据是「全篇的目标词」，不是「本段分到的词」。
+
+    一个分给第 3 段的词真的出现在第 1 段里，那是一处货真价实的语境——
+    按本段的词去滤会把它丢掉，而累计语境正是这个应用最不该丢的东西。
+    """
+    para = {"sentences": [{
+        "en": "The shop was abandoned, and the silence stayed on.", "zh": "废弃了。",
+        "targets": [{"lemma": "abandon", "surface": "abandoned"},
+                    {"lemma": "silence", "surface": "silence"}]}]}
+    out = ArticleTask._normalize(para, expected=["abandon"], wanted=["abandon", "silence"])
+    assert [t["lemma"] for t in out["sentences"][0]["targets"]] == ["abandon", "silence"]
+
+
+def test_同一句里同一个词的两种形态都要留着():
+    """去重按 (词, 形态)，不能只按词——两处都该高亮。"""
+    para = {"sentences": [{
+        "en": "He abandoned the shop, and the abandoning was quick.", "zh": "x",
+        "targets": [{"lemma": "abandon", "surface": "abandoned"},
+                    {"lemma": "abandon", "surface": "abandoning"}]}]}
+    out = ArticleTask._normalize(para, expected=[], wanted=["abandon"])
+    assert [t["surface"] for t in out["sentences"][0]["targets"]] == ["abandoned", "abandoning"]
+
+
+def test_认领之后撞车的两条要去重():
+    """abandon 和 abandoned 会归到同一个词上，不去重就会标两遍。"""
+    para = {"sentences": [{
+        "en": "The shop was abandoned.", "zh": "x",
+        "targets": [{"lemma": "abandon", "surface": "abandoned"},
+                    {"lemma": "Abandoned", "surface": "abandoned"}]}]}
+    out = ArticleTask._normalize(para, expected=["abandon"], wanted=["abandon"])
+    assert len(out["sentences"][0]["targets"]) == 1
+
+
+def test_收敛不影响模型漏标时的兜底(fake_llm, happy_responses):
+    """模型一个 target 都不标时，_appears 补出来的那条不能被一起滤掉。"""
+    happy_responses["write"] = {"sentences": [
+        {**GOOD_PARAGRAPH["sentences"][0], "targets": []}]}
+    doc, stats, _ = run_pipeline(fake_llm(happy_responses))
+    assert sorted({lemma for lemma, _ in _marked(doc)}) == ["abandon", "silence"]
+    assert stats["targets_hit"] == 2
+
+
+# ----------------------------------------------------------------- 段数上限
+
+def test_模型回多少段就写多少段是不行的(fake_llm, happy_responses):
+    """MAX_PARAGRAPHS 一直只是 sizing() 的入参，从没拦过模型真的回了几段。
+
+    管线里其它每一处模型输出都做了归一和收敛，唯独段数是照单全收的：
+    实测模型回 40 段时，顺风路径的 4 次调用变成 44 次、二十多分钟。
+    而且它不报错——前端进度条会自己把分母加大，看着只是「这篇比较久」。
+    """
+    happy_responses["plan"] = {**GOOD_PLAN, "paragraphs": [
+        {"focus": f"f{i}", "words": ["abandon"] if i == 30 else (["silence"] if i == 31 else [])}
+        for i in range(40)
+    ]}
+    llm = fake_llm(happy_responses)
+    doc, stats, events = run_pipeline(llm)
+
+    assert len(doc["paragraphs"]) == MAX_PARAGRAPHS
+    assert llm.calls.count("write") == MAX_PARAGRAPHS
+    # 被砍掉的段落里的目标词不能跟着丢
+    assert stats["targets_hit"] == stats["targets_total"] == 2
+    assert stats["targets_missed"] == []
+    # 静默截断读起来和「模型本来就只规划了这么多段」一模一样，必须说一声
+    assert any("裁掉" in e.get("message", "") for e in events if e.get("type") == "phase")
+
+
+def test_没超上限时不多嘴(fake_llm, happy_responses):
+    llm = fake_llm(happy_responses)
+    _, _, events = run_pipeline(llm)
+    assert not any("裁掉" in e.get("message", "") for e in events if e.get("type") == "phase")
 
 
 # --------------------------------------------------------------------- 篇幅

@@ -118,6 +118,16 @@ def stub_llm(monkeypatch):
     ("sentences 里是字符串", {"sentences": ["river promise return"]}),
     ("顶层是字符串",       "抱歉我不能完成"),
     ("顶层是数字",         5),
+    # 上面四条守的是**容器**的形状。下面这几条守的是**值**——容器对、
+    # 但 en / zh 不是字符串。schema.py 的 _text 就是为这件事存在的
+    # （「模型偶尔把 title_en 写成对象」），而 health.py 另起了一套取值方式，
+    # 那道防线没跟过来：`(s.get("en") or "").strip()` 抛的 AttributeError
+    # 不在 except 的捕获范围里，整次检验变成 HTTP 500，L4 一次都跑不到。
+    ("en 是对象",          {"sentences": [{"en": {"text": "river"}, "zh": "河。"}]}),
+    ("zh 是对象",          {"sentences": [{"en": "The river returns.", "zh": {"t": "河。"}}]}),
+    ("en 是数字",          {"sentences": [{"en": 123, "zh": "河。"}]}),
+    ("en 是数组",          {"sentences": [{"en": ["river", "promise"], "zh": "河。"}]}),
+    ("zh 是 null",         {"sentences": [{"en": "The river returns.", "zh": None}]}),
 ])
 def test_L3_拿到畸形形状时报告而不是崩(stub_llm, name, payload):
     """检验在它该报告问题的那一刻崩掉，等于这一层不存在。
@@ -133,6 +143,24 @@ def test_L3_拿到畸形形状时报告而不是崩(stub_llm, name, payload):
     steps = {s["id"]: s for s in r["steps"]}
     assert steps["task"]["ok"] is False, name
     assert steps["task"]["error"], f"{name}：没过就得说清为什么"
+
+
+@pytest.mark.parametrize("payload", [
+    {"sentences": [{"en": {"text": "river"}, "zh": "河。"}]},
+    {"sentences": [{"en": "The river returns.", "zh": {"t": "河。"}}]},
+    {"sentences": [{"en": 123, "zh": 456}]},
+])
+def test_值不是字符串时_L4_照样跑得到(stub_llm, payload):
+    """和下面那条同一个道理，换成「值畸形」这一类。
+
+    L4 是这个产品唯一验「审计判不判得准」的地方。L3 因为一个不是字符串的
+    en 就把整次请求打断的话，用户看到的只有一句「检验请求失败」——
+    最该跑的那一层反而永远跑不到。
+    """
+    stub_llm(payload)
+    steps = {s["id"]: s for s in health.check("deepseek", "deepseek-v4-pro", "sk-test")["steps"]}
+    assert steps["task"]["ok"] is False
+    assert steps["clue"]["ok"] is True, "L4 应该照常跑完并给出结论"
 
 
 def test_L3_挂掉不影响最要紧的_L4(stub_llm):
@@ -161,3 +189,18 @@ def test_L3_验收标准():
                            "zh": "河流守住承诺，还会回来。",
                            "targets": [{"lemma": "river", "surface": "river"}]}]}
     assert health._audit(good) == []
+
+
+@pytest.mark.parametrize("value", [{"text": "x"}, ["x"], 5, None, True])
+def test_取值对任意类型都不抛(value):
+    """_field 是 health.py 这一侧的 `_text`：非字符串一律当空，绝不抛。
+
+    这一层的存在理由就是「模型可能吐出形状不对的东西」，所以它自己对输入
+    不能有任何假设——校验代码比被校验的代码更不能有假设（需要注意.md 第 1 条）。
+    """
+    assert health._field({"en": value}, "en") == ""
+    assert health._field(value, "en") == ""
+    # 崩不崩是关键；报出来的内容对不对是顺带
+    issues = health._audit({"sentences": [{"en": value, "zh": value}]})
+    assert any("英文为空" in p for p in issues)
+    assert any("缺中文" in p for p in issues)

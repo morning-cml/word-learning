@@ -38,10 +38,27 @@ def _read() -> dict[str, Any]:
 
 
 def _write(data: dict[str, Any]) -> None:
+    """先写 .partial 再原子改名——和 core/store/backup.py 对数据库的做法一致。
+
+    原来是直接 write_text，也就是「先把文件截断，再往里写」。中途断电、
+    进程被杀、磁盘满，留下的就是半个 JSON；而 _read() 会把
+    JSONDecodeError 吞掉、安静地退回 DEFAULTS——**API Key 就此消失**，
+    界面上表现为「Key 没了，provider 也回到了默认那家」。
+    更要命的是下一步：用户随手再存一次设置，_read() 拿到的是 DEFAULTS，
+    _write() 就把这份不带 key 的完整文件盖上去，半个文件这条线索也没了。
+
+    这个文件和 data/app.db 是本机仅有的两份不可再生状态（一份是 Key，
+    一份是学习状态）。数据库那边一直是 .partial + replace()，这边不该例外。
+    """
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    partial = SETTINGS_PATH.with_name(SETTINGS_PATH.name + ".partial")
+    try:
+        partial.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        partial.replace(SETTINGS_PATH)      # 同盘改名是原子的，读者要么看到旧的要么看到新的
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def load() -> dict[str, Any]:

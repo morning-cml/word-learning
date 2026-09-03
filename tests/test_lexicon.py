@@ -140,6 +140,86 @@ def test_异干替补的词不再被改名(word):
     assert cefr.resolve(word) == word
 
 
+@pytest.mark.parametrize("raw,expect", [
+    ("B2", "B2"), ("b2", "B2"), ("  c1  ", "C1"), ("A1", "A1"),
+    ("", "B2"), (None, "B2"), ("Z9", "B2"), ("中级", "B2"), (2, "B2"), (["B2"], "B2"),
+])
+def test_用词上限收敛到已知的那六档(raw, expect):
+    """认不出来就退回默认档，绝不让它一路走到 within()。
+
+    within() 里 `LEVEL_INDEX.get(max_level, ...)` 查不到时原来取的是
+    **最宽松**的一档，于是一个 'b2'、一个尾随空格、或者
+    settings.local.json 里留下的一个旧值，就能让整把标尺静默失效。
+    """
+    assert cefr.normalize_level(raw) == expect
+
+
+def test_认不出来的上限按最严算(cefr_table):
+    """这条分支正常走不到（调用方都先过 normalize_level）。
+
+    真走到了，宁可整段判超纲、让修复循环当场炸出来，也不要安安静静
+    把标尺放到最宽——后者没有任何人会发现。
+
+    自带词表而不是依赖 data/cefr.csv：没下载词表的机器（CI 就是）会退回
+    内置兜底表，那张表把所有词都标成 A1，这条断言就会因为「碰巧都是 A1」
+    而通过，测的是别的东西（见 需要注意.md 第 17 条）。
+    """
+    cefr_table({"the": "A1", "obscure": "C1"})
+    assert cefr.within("obscure", "C1") is True
+    assert cefr.within("obscure", "C2") is True
+    assert cefr.within("obscure", "认不出来的档位") is False, "不能因为看不懂就放行"
+
+
+def test_等级取最容易的那个候选(cefr_table):
+    """屈折形自己也是词条时，别让它把原形挡住。
+
+    `lemma_candidates` 把词本身排在最前，而 `level_of` 原来「第一个命中就返回」，
+    于是 standing（C2，名词「地位」）把 stand（A1）挡住了，cones 命中 con（C1）、
+    cone 轮不到。和 `_load()` 里「同一个词有多条词性记录时取最容易的那一级」
+    是同一条规矩——标尺要回答的是「读者读不读得下去」。
+    """
+    cefr_table({"stand": "A1", "standing": "C2", "cone": "B1", "con": "C1",
+                "obscure": "C1"})
+    assert cefr.level_of("standing") == "A1"
+    assert cefr.level_of("Standing") == "A1"
+    assert cefr.level_of("cones") == "B1"
+    assert cefr.level_of("obscure") == "C1", "只有一个候选时行为不变"
+    assert cefr.level_of("完全不在表里") is None
+
+
+def test_并列时仍然以词本身为准(cefr_table):
+    """min 遇到并列取先出现的，而词本身排在候选最前——等级一样时行为不变。"""
+    cefr_table({"stand": "B1", "standing": "B1"})
+    assert cefr.level_of("standing") == "B1"
+
+
+def test_取最容易的候选只会放松不会收紧(cefr_table):
+    """这个改动是单向的：任何词的判定只可能变容易，不可能变难。
+
+    有了这条，往 lemma_candidates 里加规则时至少能保证不会突然多判一批
+    超纲词、白烧修复调用。
+    """
+    from core.lexicon.lemma import lemma_candidates      # noqa: PLC0415
+
+    table = {"stand": "A1", "standing": "C2", "cone": "B1", "con": "C1",
+             "abandon": "B1", "abandoned": "B2", "happy": "A1", "happier": "C1"}
+    cefr_table(table)
+    for word in [*table, "standing", "cones", "abandoned", "happier", "runs"]:
+        got = cefr.level_of(word)
+        if got is None:
+            continue
+        present = [table[c] for c in lemma_candidates(word) if c in table]
+        assert cefr.LEVEL_INDEX[got] == min(cefr.LEVEL_INDEX[p] for p in present), word
+
+
+def test_同一段文本_大小写不同的上限判出同样的结果(cefr_table):
+    cefr_table({"the": "A1", "obscure": "C1"})
+    text = "The obscure thing was there."
+    base = cefr.scan(text, cefr.normalize_level("B2"))["offender_count"]
+    for variant in ("b2", "B2 ", " b2"):
+        assert cefr.scan(text, cefr.normalize_level(variant))["offender_count"] == base
+
+
 def test_累计词汇量是单调不减的():
     """首页拿它给「用词上限」四档标词汇量。
 
@@ -191,21 +271,40 @@ DERIVED = {
     ("reluctant", "reluctantly", "He spoke reluctantly.",     "B2"),
     ("annoy",     "annoyed",     "She was annoyed.",          "A2"),
 ])
-def test_目标词的派生形式不算超纲(cefr_table, target, derived, text, level):
-    """abandon 写进文章时长的是 abandoned——管线自己的 prompt 样例就是这么写的。
+def test_派生形式按原形的难度算(cefr_table, target, derived, text, level):
+    """派生形式自己也是词条、而且比原形更难时，标尺该按哪一个算。
 
-    而 `abandoned` 在 CEFR-J 里是一个独立词条（B2），于是
-    `resolve("abandoned")` 得到的是 `abandoned` 而不是 `abandon`，
-    和 allow 里那个 `abandon` 永远碰不上头。
+    按最容易的那个算。`level_of` 原来是「第一个命中的候选就返回」，而
+    `lemma_candidates` 把词本身排在最前面——于是 abandoned（B2）把
+    abandon（B1）挡住了，reluctantly（C1）把 reluctant（B2）挡住了。
+    读者认得原形就读得下去，判成超纲是标尺自己错了。
 
-    代价不是「少判一个词」：check_paragraph 会据此判 too_hard，
-    接着拿修复预算要求模型「把 abandoned 换成 B2 以内的说法」——
-    **花钱让它删掉这篇文章要教的那个词**；stats 还会把目标词本身
-    列进「文中仍有超纲词」。而用户看到的只是「生成完成」。
+    代价不是「多判一个词」：check_paragraph 会据此判 too_hard，接着拿修复
+    预算要求模型「把 abandoned 换成 B2 以内的说法」——**花钱让它删掉这篇
+    文章要教的那个词**；stats 还会把目标词本身列进「文中仍有超纲词」。
+    而用户看到的只是「生成完成」。
+
+    所以这三对现在**不给 allow 也不算超纲**。真词表里这样的组合有 983 对。
     """
     cefr_table(DERIVED)
-    assert offenders(text, level) == {derived}, "前提：不给 allow 时它确实超纲"
+    assert offenders(text, level) == set()
     assert offenders(text, level, allow={target}) == set()
+
+
+def test_原形本身也超纲时靠_allow_兜住(cefr_table):
+    """上面那条修的是标尺，这条守的是标尺够不着的地方。
+
+    原形自己就超出上限（或者压根不在词表里）时，取最容易的候选也救不了——
+    这时唯一拦住「把目标词自己判成超纲」的就是 allow + same_word。
+    两道防线必须分开测：合在一条里的话，上面那条一改，这条会跟着变成空跑
+    （见 需要注意.md 第 17 条）。
+    """
+    cefr_table(DERIVED)
+    #  上限压到 A1：abandon 自己就是 B1，取最容易的候选也还是超
+    assert offenders("The house was abandoned.", "A1") == {"abandoned"}
+    #  resolve("abandoned") 命中 abandoned 这个词条，和 allow 里的 abandon
+    #  碰不上头，所以这里真正起作用的是 same_word 那条路
+    assert offenders("The house was abandoned.", "A1", allow={"abandon"}) == set()
 
 
 def test_目标词不会把别的词一起放行(cefr_table):

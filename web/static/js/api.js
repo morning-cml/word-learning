@@ -72,6 +72,7 @@ export const article = {
   preview:  (words)        => post('/api/article/plan-preview', { words }),
   list:     ()             => get('/api/articles'),
   read:     (id)           => get(`/api/articles/${id}`),
+  impact:   (id)           => get(`/api/articles/${id}/impact`),
   remove:   (id)           => del(`/api/articles/${id}`),
   generate: (payload, onEvent, opts) => stream('/api/article/generate', payload, onEvent, opts),
 };

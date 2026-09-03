@@ -107,6 +107,13 @@ check('选题理由显示', text.includes('这批词有共同的情绪场'));
 check('重试被标红', [...doc.querySelectorAll('#timeline .step.bad')].some(s => s.textContent.includes('重试')));
 check('修复步骤可见', text.includes('第 1 次修复'));
 check('逐段线索结论显示', text.includes('abandon=strong') && text.includes('confess=weak'));
+//  补线索两轮都没救回来的那一段要看得出来。这个判断原先算了却没接上
+//  （三元两个分支都返回空串），于是它和一段全 strong 的长得一模一样
+const paraSteps = [...doc.querySelectorAll('#timeline .step')].filter(s => /第 \d+ 段完成/.test(s.textContent));
+check('线索没达标的那一段被标出来',
+      paraSteps.find(s => s.textContent.includes('confess=weak'))?.classList.contains('bad') === true);
+check('全 strong 的那一段不标',
+      paraSteps.find(s => s.textContent.includes('abandon=strong'))?.classList.contains('bad') === false);
 check('没有残留的进行中步骤', doc.querySelectorAll('#timeline .step.active').length === 0);
 check('结果卡片出现', !doc.querySelector('#resultCard').hidden);
 check('阅读器链接指向新文章', doc.querySelector('#openReader').getAttribute('href') === '/read/42');

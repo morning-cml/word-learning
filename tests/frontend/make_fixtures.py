@@ -153,7 +153,8 @@ def main() -> int:
         shutil.rmtree(OUT)
     OUT.mkdir(parents=True)
 
-    client = TestClient(backend.app)
+    # 同 tests/test_web.py：应用只认回环名字，TestClient 默认的 testserver 会被挡
+    client = TestClient(backend.app, base_url="http://127.0.0.1")
 
     for name, path in PAGES:
         (OUT / f"{name}.html").write_text(client.get(path).text, encoding="utf-8")

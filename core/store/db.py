@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.lexicon import cefr
 from core.store import backup
 from core.store.models import (
-    Article, Base, Encounter, Sentence, Word, WordForm, utcnow,
+    Article, Base, Encounter, Sentence, Word, WordForm, as_utc, utcnow,
 )
 
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "app.db"
@@ -30,10 +30,20 @@ _ACTUAL = "(SELECT COUNT(*) FROM encounters WHERE encounters.word_id = words.id)
 # 最近一次备份的结果，供设置页显示。备份失败不该弹窗打断启动，
 # 但也不能全无声息——用户会以为自己有备份，其实没有。
 _backup_state: dict = {"ok": True, "made": False, "count": 0, "latest": "", "error": ""}
+# 最近一次「删除前留档」的结果。删除接口拿它告诉用户这次到底留下没有——
+# 备份悄悄失败比没有备份更糟：用户以为自己有退路。
+_delete_backup: dict = {}
 
 
 def backup_state() -> dict:
-    return dict(_backup_state)
+    state = dict(_backup_state)
+    # 删除前留的那条线现算：它不在启动路径上，_backup_state 里没有它。
+    state["protected"] = len(backup.snapshots(DB_PATH, tag=backup.BEFORE_DELETE))
+    return state
+
+
+def last_delete_backup() -> dict:
+    return dict(_delete_backup)
 
 
 def init_db() -> None:
@@ -224,6 +234,42 @@ def save_article(s: Session, doc: dict, meta: dict) -> Article:
     return article
 
 
+def deletion_impact(s: Session, article_id: int) -> dict | None:
+    """删这篇会连带删掉什么。只读，不写。
+
+    界面上那个「删除」按钮从来没说过它会连着语境一起删。文章本身能重新生成，
+    **累计语境不能**——它是一次次阅读攒出来的，而且删掉之后连「本来有多少」
+    都查不到了。所以确认之前必须把代价摆出来，尤其是
+    `orphaned`：这些词只在这一篇里出现过，删了就等于从没学过。
+    """
+    from sqlalchemy import func
+
+    if s.get(Article, article_id) is None:
+        return None
+
+    here = s.execute(
+        select(Encounter.word_id, Word.lemma, func.count().label("n"))
+        .join(Sentence, Encounter.sentence_id == Sentence.id)
+        .join(Word, Encounter.word_id == Word.id)
+        .where(Sentence.article_id == article_id)
+        .group_by(Encounter.word_id, Word.lemma)
+    ).all()
+    if not here:
+        return {"contexts": 0, "words": 0, "orphaned": []}
+
+    totals = dict(s.execute(
+        select(Encounter.word_id, func.count())
+        .where(Encounter.word_id.in_([row.word_id for row in here]))
+        .group_by(Encounter.word_id)
+    ).all())
+    return {
+        "contexts": sum(row.n for row in here),
+        "words": len(here),
+        # 别处一处语境都没有的词——删完这个词条就只剩一个名字了
+        "orphaned": sorted(r.lemma for r in here if totals.get(r.word_id, 0) <= r.n),
+    }
+
+
 def delete_article(s: Session, article_id: int) -> bool:
     """删掉一篇文章，并按剩下的语境重算受影响词条的计数。
 
@@ -237,6 +283,16 @@ def delete_article(s: Session, article_id: int) -> bool:
     article = s.get(Article, article_id)
     if article is None:
         return False
+
+    # 动手之前先留档，和 init_db 里 _reconcile_counts 之前那次是同一条规矩：
+    # **明知自己马上要动库的调用方必须自己传 force**。放在这里而不是接口层，
+    # 是因为「每条删除路径都记得配一次」这种要求迟早会漏——和这个函数
+    # 选择重算而不是做减法，理由是同一个。
+    #
+    # 走单独的轮换线：例行快照的窗口是「最近 5 次有写入的启动」，
+    # 误删之后再生成 5 篇就把删之前那份挤掉了，而那正是唯一想找回来的一份。
+    _delete_backup.clear()
+    _delete_backup.update(backup.run(DB_PATH, force=True, tag=backup.BEFORE_DELETE))
 
     affected = set(s.scalars(
         select(Encounter.word_id)
@@ -295,7 +351,8 @@ def article_to_doc(article: Article) -> dict:
         "model": article.model,
         "target_words": article.target_words or [],
         "stats": article.stats or {},
-        "created_at": article.created_at.isoformat() if article.created_at else "",
+        # 补回 UTC 标记再下发，否则前端把 UTC 当本地时间读第二遍（见 as_utc）
+        "created_at": as_utc(article.created_at).isoformat() if article.created_at else "",
         "paragraphs": [
             {"sentences": paras[k]} for k in sorted(paras)
         ],

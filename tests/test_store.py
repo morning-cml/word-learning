@@ -200,6 +200,100 @@ def test_库是干净的时候一行都不写(temp_db):
     assert temp_db._reconcile_counts() == 0
 
 
+def test_删之前先算清楚要丢什么(temp_db):
+    """那个「删除」按钮从来没说过它会连着语境一起删。
+
+    文章能重新生成，累计语境不能——而且删完连「本来有多少」都查不到了。
+    所以代价必须在确认之前就摆出来，尤其是 orphaned：这些词只在这一篇里
+    出现过，删了等于从没学过。
+    """
+    from tests.test_store import DOC, META      # noqa: PLC0415
+
+    def doc(words):
+        return {**DOC, "paragraphs": [{"sentences": [
+            {"en": f"The {w} was there and it stayed on.", "zh": "在。",
+             "targets": [{"lemma": w, "surface": w}]} for w in words], "audits": []}]}
+
+    with temp_db.session() as s:
+        a1 = temp_db.save_article(s, doc(["abandon", "silence"]), META)
+        temp_db.save_article(s, doc(["abandon", "hesitate"]), META)
+
+    with temp_db.session() as s:
+        impact = temp_db.deletion_impact(s, a1.id)
+    assert impact["contexts"] == 2
+    assert impact["words"] == 2
+    # abandon 另一篇里也有，不算孤儿；silence 只在这一篇里
+    assert impact["orphaned"] == ["silence"]
+
+
+def test_没有语境的文章如实说没有(temp_db):
+    from tests.test_store import DOC, META      # noqa: PLC0415
+
+    bare = {**DOC, "paragraphs": [{"sentences": [
+        {"en": "Nothing marked here.", "zh": "什么都没标。", "targets": []}], "audits": []}]}
+    with temp_db.session() as s:
+        art = temp_db.save_article(s, bare, META)
+    with temp_db.session() as s:
+        assert temp_db.deletion_impact(s, art.id) == {"contexts": 0, "words": 0, "orphaned": []}
+
+
+def test_算代价不存在的文章返回_None(temp_db):
+    with temp_db.session() as s:
+        assert temp_db.deletion_impact(s, 12345) is None
+
+
+def test_删之前一定留得下删除前的快照(temp_db):
+    """和 init_db 里 _reconcile_counts 之前那次是同一条规矩：
+
+    明知自己马上要动库的调用方必须自己传 force。放在 delete_article 里面
+    而不是接口层——「每条删除路径都记得配一次」这种要求迟早会漏，
+    和这个函数选择重算而不是做减法，理由是同一个。
+    """
+    from core.store import backup                # noqa: PLC0415
+    from tests.test_store import DOC, META       # noqa: PLC0415
+
+    with temp_db.session() as s:
+        art = temp_db.save_article(s, DOC, META)
+    assert backup.snapshots(temp_db.DB_PATH, tag=backup.BEFORE_DELETE) == []
+
+    with temp_db.session() as s:
+        temp_db.delete_article(s, art.id)
+
+    saved = backup.snapshots(temp_db.DB_PATH, tag=backup.BEFORE_DELETE)
+    assert len(saved) == 1
+    assert temp_db.last_delete_backup()["made"] is True
+    # 留的必须是**删之前**的状态
+    import sqlite3                               # noqa: PLC0415
+    con = sqlite3.connect(str(saved[0]))
+    assert con.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 1
+    con.close()
+
+
+def test_例行快照挤不掉删除前那一份(temp_db):
+    """例行快照的窗口是「最近 5 次有写入的启动」，不是「最近几天」。
+
+    误删一篇之后再生成 5 篇，删之前那份就被轮换掉了——而那正是唯一
+    想找回来的一份。两种快照价值不一样，就不该抢同一批槽位。
+    """
+    from core.store import backup                # noqa: PLC0415
+    from tests.test_store import DOC, META       # noqa: PLC0415
+
+    with temp_db.session() as s:
+        art = temp_db.save_article(s, DOC, META)
+    with temp_db.session() as s:
+        temp_db.delete_article(s, art.id)
+    protected = backup.snapshots(temp_db.DB_PATH, tag=backup.BEFORE_DELETE)[0].name
+
+    for _ in range(backup.KEEP * 2):             # 远超例行那条线的容量
+        with temp_db.session() as s:
+            temp_db.save_article(s, DOC, META)
+        backup.run(temp_db.DB_PATH, force=True)
+
+    assert len(backup.snapshots(temp_db.DB_PATH)) == backup.KEEP
+    assert [p.name for p in backup.snapshots(temp_db.DB_PATH, tag=backup.BEFORE_DELETE)] == [protected]
+    assert temp_db.backup_state()["protected"] == 1
+
+
 def test_删不存在的文章返回_False(temp_db):
     with temp_db.session() as s:
         assert temp_db.delete_article(s, 999999) is False
