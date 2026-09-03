@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.lexicon import cefr
 from core.store import backup
 from core.store.models import (
-    Article, Base, Encounter, Sentence, Word, WordForm, as_utc, utcnow,
+    STATUS_IGNORED, Article, Base, Encounter, Sentence, Word, WordForm, as_utc, utcnow,
 )
 
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "app.db"
@@ -405,6 +405,23 @@ def set_word_status(s: Session, lemma: str, status: int) -> dict | None:
         return None
     word.status = status
     return {"lemma": word.lemma, "status": word.status, "status_label": word.status_label}
+
+
+def ignored_lemmas(s: Session) -> set[str]:
+    """用户标成「忽略」的词条（Lute 的 status 99，「专有名词等」）。
+
+    这个状态一直只是个标签：字段有、按键有（阅读页按 I）、词库页也显示，
+    但难度标尺从来不读它——把 Nora 标成忽略，下一篇生成完全不受影响。
+
+    Lute 那边的做法是判定的依据：它算生词占比时只把 status 0（人从没碰过）
+    算成生词，**凡是人碰过一次的（含 99）就永远不再计入**
+    （见 lute/book/stats.py 的 calc_status_distribution）。
+    专有名词识别没有便宜又可靠的启发式——Paul Nation 的 BNC/COCA 词表
+    干脆随词表附一张专有名词表。两条路都是「做成数据，别去推断」，
+    而这个项目已经有了收集这份数据的入口，只是没接上。
+    """
+    rows = s.scalars(select(Word.lemma).where(Word.status == STATUS_IGNORED))
+    return {lemma for lemma in rows if lemma}
 
 
 def word_stats(s: Session) -> dict:

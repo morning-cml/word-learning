@@ -317,6 +317,30 @@ def test_词条按用户给的词存不改名(temp_db):
         assert temp_db.get_or_create_word(s, "ran").lemma == "run"      # 屈折形态照旧归并
 
 
+def test_标成忽略的词能查出来(temp_db):
+    """这个状态一直只是个标签：字段有、按键有、词库页也显示，标尺从来不读它。
+
+    Lute 的做法是判定依据：算生词占比时只把 status 0（人从没碰过）算成生词，
+    凡是人碰过一次的（含 99 忽略）就永远不再计入
+    （lute/book/stats.py 的 calc_status_distribution）。
+    专有名词识别没有便宜又可靠的启发式——Paul Nation 的 BNC/COCA 词表干脆
+    随词表附一张专有名词表。两条路都是「做成数据，别去推断」。
+    """
+    from tests.test_store import DOC, META      # noqa: PLC0415
+
+    with temp_db.session() as s:
+        temp_db.save_article(s, DOC, META)
+        assert temp_db.ignored_lemmas(s) == set()
+        temp_db.set_word_status(s, "abandon", 99)
+
+    with temp_db.session() as s:
+        assert temp_db.ignored_lemmas(s) == {"abandon"}
+        #  只认 99，别的档一律不算
+        temp_db.set_word_status(s, "abandon", 98)
+    with temp_db.session() as s:
+        assert temp_db.ignored_lemmas(s) == set()
+
+
 def test_改掌握程度(temp_db):
     save(temp_db)
     with temp_db.session() as s:

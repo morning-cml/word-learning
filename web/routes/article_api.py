@@ -163,8 +163,15 @@ def _generate(payload: dict, out: queue.Queue, cancel: threading.Event) -> None:
         )
         task = tasks.get("article")
 
+        # 用户标成「忽略」的词不该被难度标尺判成超纲（Lute 的 status 99，
+        # 「专有名词等」）。在这里查、当参数传进去，而不是让任务层自己开
+        # db.session()——管线的测试大多不带 temp_db，任务层碰库会让它们
+        # 去读用户真正的那个库（需要注意.md 第 17c 条）。
+        with db.session() as s:
+            ignored = db.ignored_lemmas(s)
+
         document, stats = None, {}
-        for event in task.run(llm, {"words": words, "level": level}):
+        for event in task.run(llm, {"words": words, "level": level, "ignored": ignored}):
             if cancel.is_set():
                 out.put({"type": "cancelled"})
                 return                      # 半篇文章不落库

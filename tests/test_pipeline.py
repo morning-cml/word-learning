@@ -328,6 +328,47 @@ def test_收敛不影响模型漏标时的兜底(fake_llm, happy_responses):
     assert stats["targets_hit"] == 2
 
 
+# ------------------------------------------------------------- 标成忽略的词
+
+def test_标成忽略的词不再算超纲(fake_llm, happy_responses):
+    """人判一次，永久生效——这是 Lute 那套 status 的用法。
+
+    专有名词没有便宜又可靠的自动判据（人名和普通词大面积同形：Rose、Will、
+    Grace、Hope…），所以这个领域的两种成熟做法都是「做成数据」：
+    Paul Nation 的词表附一张专有名词表，Lute 让用户标一次然后永久生效。
+    这个项目本来就有 status 99「忽略（专有名词等）」和阅读页的 I 键，
+    只是难度标尺从来没读过它。
+    """
+    happy_responses["write"] = {"sentences": [{
+        "en": "Nora abandoned the shop, and the silence stayed on for months.",
+        "zh": "Nora 废弃了小店，寂静留了好几个月。",
+        "targets": GOOD_PARAGRAPH["sentences"][0]["targets"],
+    }]}
+
+    _, before, _ = run_pipeline(fake_llm(happy_responses))
+    assert "Nora" in {o["surface"] for o in before["offenders"]}, "前提：不标就会被判超纲"
+
+    task = ArticleTask()
+    stats = None
+    for ev in task.run(fake_llm(happy_responses),
+                       {"words": ["abandon", "silence"], "level": "B2",
+                        "ignored": {"Nora"}}):
+        if ev["type"] == "done":
+            stats = ev["stats"]
+    assert stats["offenders"] == []
+    assert stats["offender_rate"] == 0.0
+
+
+def test_忽略集合脏了也不出错(fake_llm, happy_responses):
+    """params 是外面传进来的，别假设它一定是一堆干净的字符串。"""
+    task = ArticleTask()
+    for junk in (None, [], ["", "  "], [None, 5, {"a": 1}, "Nora"], "Nora"):
+        events = list(task.run(fake_llm(happy_responses),
+                               {"words": ["abandon", "silence"], "level": "B2",
+                                "ignored": junk}))
+        assert events[-1]["type"] == "done", junk
+
+
 # ----------------------------------------------------------------- 段数上限
 
 def test_模型回多少段就写多少段是不行的(fake_llm, happy_responses):
