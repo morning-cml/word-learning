@@ -229,22 +229,30 @@ def test_生成时把词库整份带下去(client, temp_db, monkeypatch):
     assert seen.get("studied") == {"abandon", "silence"}
 
 
-def test_把误判的词收进词库(client, temp_db):
+def test_把误判的词收进词库(client, temp_db, cefr_table):
     """标尺在结果面板上报出超纲词，用户点一下说「这个不用管」——这条回路的入口。
 
     在这之前 Word 行只有 save_article 一条来路，所以这条回路根本走不通。
+
+    自带词表而不是依赖 data/cefr.csv：没下载词表的机器（CI 就是）会退回内置
+    兜底表，那张表只有两千来个高频词，Nobody 之类会被多判成超纲，
+    「收进去之后一个超纲词都不剩」这条断言就会因为环境而挂
+    ——本机绿、CI 红，这条我刚在 CI 上真踩了一次（需要注意.md 第 17 条）。
     """
+    from core.lexicon import cefr                # noqa: PLC0415
+
+    cefr_table({"walk": "A1", "walked": "A1", "home": "A1",
+                "nobody": "A1", "else": "A1", "come": "A1", "came": "A1"})
+
     r = client.post("/api/words", json={"lemma": "Nora"})
     assert r.status_code == 200
     assert r.json() == {"lemma": "nora", "status": 99, "status_label": "忽略"}
 
     with temp_db.session() as s:
-        assert "nora" in temp_db.studied_lemmas(s)
+        studied = temp_db.studied_lemmas(s)
+    assert "nora" in studied
 
     #  收进去之后，标尺就不再判它超纲了——这才是这个接口存在的理由
-    from core.lexicon import cefr                # noqa: PLC0415
-    with temp_db.session() as s:
-        studied = temp_db.studied_lemmas(s)
     text = "Nora walked home. Nobody else came."
     assert "Nora" in {o["surface"] for o in cefr.scan(text, "B2")["offenders"]}
     assert cefr.scan(text, "B2", studied=studied)["offenders"] == []
