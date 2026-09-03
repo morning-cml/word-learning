@@ -301,6 +301,43 @@ console.log('\n7. 结果面板');
   check('老文章没有这个字段时不报', !/以前学过的词/.test(el.textContent));
 }
 
+/* -------- 超纲词可点：「这个词不用管」 --------
+   入口放在超纲词列表上，因为**问题就是在这里报出来的**。而且实测被误报的
+   多数不是人名，是标尺自己不认识的词（CEFR-J 只有 8653 条）。 */
+{
+  const ctx = boot('index');
+  const { renderStats } = await import(JS('components/stats.js'));
+  const el = q(ctx, '#stats');
+  const stats = { targets_hit: 1, targets_total: 1, word_count: 90, sentence_count: 5,
+                  offender_rate: 0.02,
+                  offenders: [{ lemma: 'nora', surface: 'Nora', level: null },
+                              { lemma: 'toward', surface: 'toward', level: null }] };
+
+  //  不接回调时不该给出点不动的按钮
+  renderStats(el, stats, ['abandon']);
+  check('没接回调时超纲词不可点', el.querySelector('button[data-ignore]') === null);
+
+  const asked = [];
+  renderStats(el, stats, ['abandon'], { onIgnore: (lemma) => { asked.push(lemma); } });
+  const btns = [...el.querySelectorAll('button[data-ignore]')];
+  check('超纲词渲染成可点的按钮', btns.length === 2);
+  check('按钮带的是还原后的原形，不是表面形态', btns[0].dataset.ignore === 'nora');
+  check('说清了点了会怎样', /不用管/.test(el.textContent));
+
+  btns[0].dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  check('点一下就把这个词交出去', asked.join() === 'nora');
+  check('点过的标成已处理', btns[0].classList.contains('ignored'));
+  check('等级徽章没被文字覆盖冲掉', btns[0].textContent.includes('Nora'));
+
+  //  重渲染之后回调要换成最新那个，监听器只挂一次
+  const later = [];
+  renderStats(el, stats, ['abandon'], { onIgnore: (lemma) => { later.push(lemma); } });
+  el.querySelector('button[data-ignore]').dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  check('重渲染后用的是新回调，且没有重复触发', later.join() === 'nora' && asked.length === 1);
+}
+
 /* ============================ 阅读器：热键与排版 ============================
    jsdom 没有布局引擎，量不了「面板还盖不盖得住正文」（那条用 puppeteer 量了，
    见 需要注意.md 第 16 条）。这里验的是它验得了的部分：事件流、DOM 状态、

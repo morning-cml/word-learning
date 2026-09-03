@@ -79,6 +79,9 @@ export const article = {
 
 export const words = {
   list:      ()             => get('/api/words'),
+  // 「这个词不用管」——收进词库并标成忽略（99）。难度标尺读整个词库，
+  // 所以以后就不会再把它判成超纲。99 这个数字只在这一处出现。
+  ignore:    (lemma)        => post('/api/words', { lemma, status: 99 }),
   detail:    (lemma)        => get(`/api/words/${encodeURIComponent(lemma)}`),
   setStatus: (lemma, value) => post(`/api/words/${encodeURIComponent(lemma)}/status`, { status: value }),
 };

@@ -341,6 +341,42 @@ def test_词库里的词能整份查出来(temp_db):
         assert temp_db.studied_lemmas(s) == got
 
 
+def test_收一个不是目标词的词进词库(temp_db):
+    """在这之前 Word 行只有一条来路：save_article 从目标词建。
+
+    于是「忽略（专有名词等）」这个状态对它设计时写的那个用例是空的——
+    Nora 根本进不了词库，也就无从标起。
+    """
+    with temp_db.session() as s:
+        got = temp_db.add_word(s, "Nora")
+        assert got["lemma"] == "nora" and got["status"] == 99
+
+    with temp_db.session() as s:
+        assert temp_db.studied_lemmas(s) == {"nora"}
+        #  没建 Encounter：这个词没出现在任何被记录的语境里，凭空造一条会把
+        #  「见过 N 次」和「列得出几处语境」这条不变式弄脏（第 10 条）
+        assert temp_db.word_detail(s, "nora")["contexts"] == []
+        assert temp_db.word_detail(s, "nora")["times_seen"] == 0
+
+
+def test_重复收同一个词只会改状态(temp_db):
+    with temp_db.session() as s:
+        temp_db.add_word(s, "Nora")
+        temp_db.add_word(s, "nora", 98)
+    with temp_db.session() as s:
+        assert temp_db.studied_lemmas(s) == {"nora"}
+        assert temp_db.word_detail(s, "nora")["status"] == 98
+
+
+@pytest.mark.parametrize("junk", ["", "   ", "123", "!!!", "x" * 81, None])
+def test_收不了的词返回_None(temp_db, junk):
+    """长度上限对齐 Word.lemma 的 String(80)——SQLite 不管，别的库会管。"""
+    with temp_db.session() as s:
+        assert temp_db.add_word(s, junk) is None
+    with temp_db.session() as s:
+        assert temp_db.studied_lemmas(s) == set()
+
+
 def test_改掌握程度(temp_db):
     save(temp_db)
     with temp_db.session() as s:

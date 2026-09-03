@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.lexicon import cefr
 from core.store import backup
 from core.store.models import (
-    Article, Base, Encounter, Sentence, Word, WordForm, as_utc, utcnow,
+    STATUS_IGNORED, Article, Base, Encounter, Sentence, Word, WordForm, as_utc, utcnow,
 )
 
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "app.db"
@@ -397,6 +397,31 @@ def word_detail(s: Session, lemma: str) -> dict | None:
         "contexts": contexts,
         "distinct_articles": len({c["article_id"] for c in contexts}),
     }
+
+
+def add_word(s: Session, lemma: str, status: int = STATUS_IGNORED) -> dict | None:
+    """把一个**不是目标词**的词收进词库。收不了就返回 None。
+
+    在这之前，Word 行只有一条来路：save_article 从目标词建。于是
+    「忽略（专有名词等）」这个状态对它设计时写的那个用例是空的——
+    Nora 根本进不了词库，也就无从标起（需要注意.md 第 3c 条）。
+
+    实际最常需要收的还不是人名。本机 7 篇文章里被判超纲的词是
+    toward、You're、cones、soundproof、half-finished 这些——**多数是标尺
+    自己不认识的词**（CEFR-J 只有 8653 条，缺一大批），不是专有名词。
+    「我认识这个词，别再判它超纲」和「这是人名」需要的是同一个动作。
+
+    不建 Encounter：这个词没有出现在任何一句被记录的语境里，
+    凭空造一条会把「见过 N 次」和「列得出几处语境」这条不变式弄脏
+    （需要注意.md 第 10 条）。
+    """
+    text = (lemma or "").strip()
+    #  长度上限对齐 Word.lemma 的 String(80)；SQLite 不管长度，别的库会管
+    if not text or len(text) > 80 or not any(c.isalpha() for c in text):
+        return None
+    word = get_or_create_word(s, text)
+    word.status = status
+    return {"lemma": word.lemma, "status": word.status, "status_label": word.status_label}
 
 
 def set_word_status(s: Session, lemma: str, status: int) -> dict | None:

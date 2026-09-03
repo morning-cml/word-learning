@@ -47,8 +47,42 @@ function auditList(audits) {
   </div>`;
 }
 
-export function renderStats(el, s, targets) {
+//  每个 #stats 容器的「忽略」回调。放 WeakMap 而不是闭包里：renderStats 会被
+//  反复调用，监听器只挂一次，但回调要能跟着最新一次调用换。
+const ignoreHandlers = new WeakMap();
+
+/** 让超纲词列表可点：点一下 = 「这个词不用管」。
+ *
+ * 入口放在这里而不是正文里，是因为**问题就是在这里报出来的**——标尺说
+ * 「文中仍有超纲词：toward、You're」，纠正它的动作就该在同一个地方。
+ * 而且实测被误报的多数不是人名，是标尺自己不认识的词（CEFR-J 只有 8653 条），
+ * 「我认识这个词」和「这是人名」需要的是同一个动作。
+ */
+function bindIgnore(el, onIgnore) {
+  ignoreHandlers.set(el, onIgnore);
+  if (el.dataset.ignoreBound) return;
+  el.dataset.ignoreBound = '1';
+  el.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-ignore]');
+    if (!btn || btn.disabled) return;
+    const handler = ignoreHandlers.get(el);
+    if (!handler) return;
+    btn.disabled = true;
+    try {
+      await handler(btn.dataset.ignore);
+      //  只加个类，不动 textContent——那会把里面的等级徽章一起冲掉
+      btn.classList.add('ignored');
+      btn.title = '已收进词库并标成「忽略」，以后不再判它超纲';
+    } catch (err) {
+      btn.disabled = false;
+      btn.title = err.message || '没能保存';
+    }
+  });
+}
+
+export function renderStats(el, s, targets, { onIgnore } = {}) {
   if (!el || !s) return;
+  if (onIgnore) bindIgnore(el, onIgnore);
 
   const missed  = new Set(s.targets_missed || []);
   // 「模型说塞不进、于是没写」和「本该写进去却没写」是两回事，chip 必须分开
@@ -115,10 +149,18 @@ export function renderStats(el, s, targets) {
   }
 
   if (s.offenders?.length) {
-    const list = s.offenders.slice(0, 10)
-      .map((o) => `<span class="offender">${escapeHtml(o.surface)}${lv(o.level)}</span>`)
-      .join('');
-    blocks.push(`<div class="offenders"><span class="hint">文中仍有超纲词</span>${list}</div>`);
+    const list = s.offenders.slice(0, 10).map((o) => {
+      const body = `${escapeHtml(o.surface)}${lv(o.level)}`;
+      if (!onIgnore) return `<span class="offender">${body}</span>`;
+      return `<button type="button" class="offender" data-ignore="${escapeHtml(o.lemma || o.surface)}"`
+           + ` title="点一下：以后不再把这个词判成超纲">${body}</button>`;
+    }).join('');
+    blocks.push(`<div class="offenders"><span class="hint">文中仍有超纲词</span>${list}`
+      + (onIgnore
+        ? '<span class="hint offenders-tip">点一下告诉程序这个词不用管——'
+          + '人名，或者你本来就认识、只是词表里没收的词</span>'
+        : '')
+      + '</div>');
   }
 
   if (s.using_real_cefr === false) {

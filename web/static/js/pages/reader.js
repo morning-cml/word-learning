@@ -29,7 +29,8 @@ export async function init({ articleId }) {
   document.title = (doc.title_en || '阅读') + ' · Word Learning';
   reader.render(doc);
   if (doc.stats && Object.keys(doc.stats).length) {
-    renderStats($('#stats'), doc.stats, doc.target_words);
+    renderStats($('#stats'), doc.stats, doc.target_words,
+                { onIgnore: (lemma) => api.words.ignore(lemma) });
     $('#statsCard').hidden = false;
   }
 

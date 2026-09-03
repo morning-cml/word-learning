@@ -467,7 +467,8 @@ export async function init() {
     tl.meta(`共 ${secs} 秒 · ${ui.stats?.llm_calls ?? '?'} 次模型调用 · ${ui.stats?.tokens ?? '?'} tokens`);
 
     if (ui.stats && ui.articleId) {
-      renderStats($('#stats'), ui.stats, targets);
+      renderStats($('#stats'), ui.stats, targets,
+                  { onIgnore: (lemma) => api.words.ignore(lemma) });
       $('#openReader').href = `/read/${ui.articleId}`;
       $('#resultCard').hidden = false;
       $('#resultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });

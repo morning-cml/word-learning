@@ -21,7 +21,7 @@ from core.llm.client import LLM
 from core.provider import registry
 from core.provider.base import ProviderError
 from core.store import db
-from core.store.models import STATUS_LABELS, as_utc
+from core.store.models import STATUS_IGNORED, STATUS_LABELS, as_utc
 from tasks.article.task import (
     MAX_PARAGRAPHS,
     MAX_WORDS,
@@ -299,6 +299,28 @@ def word_detail(lemma: str) -> dict:
         if detail is None:
             raise HTTPException(404, f"词条 {lemma} 不存在")
         return detail
+
+
+@router.post("/words")
+def add_word(payload: dict = Body(...)) -> dict:
+    """把一个不是目标词的词收进词库，默认标成「忽略」。
+
+    这是「难度标尺误判了，我来纠正它」那条回路的入口：标尺在结果面板上
+    报出超纲词，用户点一下说「这个不用管」，以后就不再判它超纲。
+    在这之前 Word 行只有 save_article 一条来路，所以这条回路根本走不通。
+    """
+    try:
+        status = int(payload.get("status", STATUS_IGNORED))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "status 必须是整数") from exc
+    if status not in STATUS_LABELS:
+        raise HTTPException(400, f"status 必须是 {sorted(STATUS_LABELS)} 之一")
+
+    with db.session() as s:
+        got = db.add_word(s, str(payload.get("lemma") or ""), status)
+    if got is None:
+        raise HTTPException(400, "这不是一个能收进词库的词")
+    return got
 
 
 @router.post("/words/{lemma}/status")

@@ -229,6 +229,39 @@ def test_生成时把词库整份带下去(client, temp_db, monkeypatch):
     assert seen.get("studied") == {"abandon", "silence"}
 
 
+def test_把误判的词收进词库(client, temp_db):
+    """标尺在结果面板上报出超纲词，用户点一下说「这个不用管」——这条回路的入口。
+
+    在这之前 Word 行只有 save_article 一条来路，所以这条回路根本走不通。
+    """
+    r = client.post("/api/words", json={"lemma": "Nora"})
+    assert r.status_code == 200
+    assert r.json() == {"lemma": "nora", "status": 99, "status_label": "忽略"}
+
+    with temp_db.session() as s:
+        assert "nora" in temp_db.studied_lemmas(s)
+
+    #  收进去之后，标尺就不再判它超纲了——这才是这个接口存在的理由
+    from core.lexicon import cefr                # noqa: PLC0415
+    with temp_db.session() as s:
+        studied = temp_db.studied_lemmas(s)
+    text = "Nora walked home. Nobody else came."
+    assert "Nora" in {o["surface"] for o in cefr.scan(text, "B2")["offenders"]}
+    assert cefr.scan(text, "B2", studied=studied)["offenders"] == []
+
+
+@pytest.mark.parametrize("payload,code", [
+    ({"lemma": "Nora", "status": 98}, 200),
+    ({"lemma": "Nora", "status": 7}, 400),
+    ({"lemma": "Nora", "status": "x"}, 400),
+    ({"lemma": ""}, 400),
+    ({"lemma": "123"}, 400),
+    ({}, 400),
+])
+def test_收词接口的入参校验(client, payload, code):
+    assert client.post("/api/words", json=payload).status_code == code
+
+
 def test_删除接口给得出代价(client, temp_db):
     from tests.test_store import DOC, META      # noqa: PLC0415
 
