@@ -93,6 +93,20 @@ export function renderStats(el, s, targets) {
     </div>`);
   }
 
+  // 学过的词在这篇里又出现了。这是好消息——多语境重复正是这个产品声称
+  // 最有效的机制——可它以前完全不可见：要么被判成超纲列进「文中仍有超纲词」，
+  // 要么被修复指令直接从文章里删掉。顺带它也是这条豁免的反馈回路：
+  // 放宽过头的话，这个名单会先变得不像话。
+  if (s.revisited?.length) {
+    const list = s.revisited.slice(0, 12).map(escapeHtml).join('、');
+    blocks.push(`<div class="note ok" style="margin-top:10px">
+      这一篇里还出现了 <b>${s.revisited.length}</b> 个你以前学过的词：${list}${
+        s.revisited.length > 12 ? ' 等' : ''}。<br>
+      <span class="hint">同一个词在不同故事里再遇到，比在单词书上重复看十遍有效——
+      它们不计入超纲。</span>
+    </div>`);
+  }
+
   if (skipped.size) {
     blocks.push(`<div class="note warn" style="margin-top:10px">
       模型判断这个题材容不下 ${[...skipped].map(escapeHtml).join('、')}，没有硬塞——

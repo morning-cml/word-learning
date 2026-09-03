@@ -205,13 +205,20 @@ def within(word: str, max_level: str) -> bool:
     return LEVEL_INDEX[lv] <= LEVEL_INDEX.get(max_level, 0)
 
 
-def scan(text: str, max_level: str, *, allow: set[str] | None = None) -> dict:
+def scan(text: str, max_level: str, *, allow: set[str] | None = None,
+         studied: set[str] | None = None) -> dict:
     """扫描文本找出超纲词。
 
-    allow  传不该被判成超纲的词：本次的目标词（它们本来就是要学的生词），
-           以及用户标成「忽略」的词条（Lute 的 status 99，「专有名词等」）。
-           两者待遇完全一样，所以合成一份传进来，不在这里分两个参数——
-           同一条规矩两份实现迟早会分叉。
+    allow    本次的目标词——它们本来就是要学的生词，不算超纲。
+    studied  这个用户词库里已有的词。难度上限本来就是「读者认不认得」的
+             代用品，而对这些词有直接证据，不必再拿 CEFR 等级去猜。
+
+    两个分开而不是合成一份，理由是**匹配方式不一样**，不是语义洁癖：
+    allow 很小（一篇文章几个词），所以除了还原后相等，还额外跑一遍
+    same_word 去认派生形式；studied 会随使用一直长（几百上千个词），
+    在每个待判词上再套一层 O(N) 的 same_word 会把扫描拖垮，
+    所以它只做「还原后相等」。词库里存的本来就是 resolve 过的原形，
+    对得上。
 
     **这里不接受模型申报的人名。** 曾经有过一个 names 参数，选题阶段模型
     报什么就无条件放行什么。问题不在「模型会不会撒谎」，在于**被检查的一方
@@ -228,6 +235,8 @@ def scan(text: str, max_level: str, *, allow: set[str] | None = None) -> dict:
     """
     targets = [w.strip() for w in (allow or set()) if w and w.strip()]
     allow_lemmas = {resolve(w) for w in targets}
+    studied_lemmas = {resolve(w) for w in (studied or set()) if w and w.strip()}
+    revisited: set[str] = set()          # 学过的词这次又出现了——这是好消息，报出去
     spans = tokenize_spans(text)
     # 句中出现的大写词是专有名词的独立证据，不依赖模型报得全不全
     mid_sentence_caps: set[str] = set()
@@ -259,6 +268,11 @@ def scan(text: str, max_level: str, *, allow: set[str] | None = None) -> dict:
         total += 1
         base = resolve(tok)
         if base in allow_lemmas:
+            continue
+        if base in studied_lemmas:
+            # 学过的词不算超纲。记下来：一篇新文章里出现旧词，正是这个产品
+            # 声称最有效的那个机制（多语境重复），不该悄悄发生。
+            revisited.add(base)
             continue
         if within(tok, max_level):
             continue
@@ -292,5 +306,6 @@ def scan(text: str, max_level: str, *, allow: set[str] | None = None) -> dict:
         "offenders": sorted(offenders.values(), key=lambda o: -o["count"]),
         "offender_count": off_total,
         "offender_rate": (off_total / total) if total else 0.0,
+        "revisited": sorted(revisited),
         "using_real_data": is_real_data(),
     }

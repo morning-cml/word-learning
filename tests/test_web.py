@@ -198,8 +198,8 @@ def test_正常入口不受影响(client, host):
     assert client.get("/api/status", headers={"Host": host}).status_code == 200
 
 
-def test_生成时把标过忽略的词带下去(client, temp_db, monkeypatch):
-    """标尺读不到这份数据的话，「忽略」就还是个纯标签。
+def test_生成时把词库整份带下去(client, temp_db, monkeypatch):
+    """标尺读不到这份数据的话，「学过的词不算超纲」就无从谈起。
 
     在接口层查、当参数传给任务层，而不是让任务层自己开 db.session()：
     管线的测试大多不带 temp_db，任务层碰库会让它们去读用户真正的那个库
@@ -209,7 +209,7 @@ def test_生成时把标过忽略的词带下去(client, temp_db, monkeypatch):
 
     with temp_db.session() as s:
         temp_db.save_article(s, DOC, META)
-        temp_db.set_word_status(s, "abandon", 99)
+        temp_db.set_word_status(s, "abandon", 99)     # status 不影响这份名单
 
     seen = {}
 
@@ -222,11 +222,11 @@ def test_生成时把标过忽略的词带下去(client, temp_db, monkeypatch):
     monkeypatch.setattr("core.settings.api_key", lambda _pid: "sk-test")
 
     with client.stream("POST", "/api/article/generate",
-                       json={"words": "silence", "level": "B2"}) as r:
+                       json={"words": "hesitate", "level": "B2"}) as r:
         body = "".join(r.iter_text())
 
     assert "到此为止" in body, "任务层没被调到，这条测的就不是它了"
-    assert seen.get("ignored") == {"abandon"}
+    assert seen.get("studied") == {"abandon", "silence"}
 
 
 def test_删除接口给得出代价(client, temp_db):

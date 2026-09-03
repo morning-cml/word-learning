@@ -156,7 +156,8 @@ class ArticleTask(Task):
     # ------------------------------------------------------------------ 校验
 
     def check_paragraph(self, para: dict, expected: list[str], level: str,
-                        allow: set[str], names: set[str]) -> list[Problem]:
+                        allow: set[str], studied: set[str],
+                        names: set[str]) -> list[Problem]:
         problems: list[Problem] = []
         sentences = para.get("sentences") or []
 
@@ -181,7 +182,7 @@ class ArticleTask(Task):
                             f"必须自然用上 {word}，并让上下文能推出它的意思")
                 )
 
-        report = cefr.scan(text, level, allow=allow)
+        report = cefr.scan(text, level, allow=allow, studied=studied)
         budget = max(OFFENDER_FLOOR, round(OFFENDER_LIMIT * report["total_words"]))
         if report["offender_count"] > budget:
             worst = [o["surface"] for o in report["offenders"][:8]]
@@ -280,17 +281,18 @@ class ArticleTask(Task):
         # 收敛用词上限：认不出来的值会让 cefr.within 的标尺静默失效（见 normalize_level）
         level: str = cefr.normalize_level(params.get("level"))
 
-        # 用户标成「忽略」的词（Lute 的 status 99，「专有名词等」）和本次的目标词，
-        # 在难度标尺面前待遇完全一样：都不该被判成超纲。所以合成一份传下去，
-        # 不给 cefr.scan 另开一个参数——同一条规矩两份实现迟早会分叉
-        # （见 需要注意.md 第 20 条）。
+        # 用户词库里已有的词不该被判成超纲：难度上限本来就是「读者认不认得」的
+        # 代用品，而对这些词有直接证据，不必再拿 CEFR 等级去猜。不接上的后果是
+        # 反着的——学过的 nostalgia / resilient / threshold 出现在下一篇 B2 文章里
+        # 会被要求「换成 B2 以内的说法」，花钱把旧词从新文章里删掉，
+        # 而多语境重复正是这个产品声称最有效的机制。
         #
         # 由调用方传进来而不是在这儿现查库：管线的测试大多不带 temp_db，
         # 这里开 db.session() 会让它们去读用户真正的那个库
-        # （需要注意.md 第 17c 条，上一轮刚踩过）。
-        ignored = {w.strip() for w in params.get("ignored") or ()
+        # （需要注意.md 第 17c 条）。
+        studied = {w.strip() for w in params.get("studied") or ()
                    if isinstance(w, str) and w.strip()}
-        exempt = set(words) | ignored
+        exempt = set(words)
         names: set[str] = set()      # 选题阶段声明的人名地名，见 cefr.scan
 
         n_para, per_para, n_sent = sizing(len(words))
@@ -368,7 +370,7 @@ class ArticleTask(Task):
                 purpose="creative", max_tokens=3000, json_schema=PARAGRAPH_SCHEMA,
             ))
 
-            problems = self.check_paragraph(para, expected, level, exempt, names)
+            problems = self.check_paragraph(para, expected, level, exempt, studied, names)
             for attempt in range(MAX_REPAIRS):
                 if not problems:
                     break
@@ -383,7 +385,7 @@ class ArticleTask(Task):
                     ),
                     purpose="structured", max_tokens=3000, json_schema=PARAGRAPH_SCHEMA,
                 ))
-                problems = self.check_paragraph(para, expected, level, exempt, names)
+                problems = self.check_paragraph(para, expected, level, exempt, studied, names)
 
             # --- 语境线索审计：机械校验过了，还要问「读者猜得出来吗」 ---
             audits = []
@@ -414,7 +416,7 @@ class ArticleTask(Task):
                         purpose="creative", max_tokens=3000, json_schema=PARAGRAPH_SCHEMA,
                     ))
                     # 补线索不能把机械校验搞坏；坏了就丢弃这次改写
-                    if self.check_paragraph(candidate, expected, level, exempt, names):
+                    if self.check_paragraph(candidate, expected, level, exempt, studied, names):
                         yield {
                             "type": "phase", "phase": "clue_fix", "index": idx,
                             "message": f"第 {idx} 段补线索后其他校验回退，已放弃该次改写",
@@ -466,7 +468,7 @@ class ArticleTask(Task):
         }
         yield {"type": "done", "document": doc, "stats": self._stats(
             doc, words, level, llm, total_repairs, dropped,
-            all_audits, total_clue_fixes, exempt,
+            all_audits, total_clue_fixes, exempt, studied,
         )}
 
     @staticmethod
@@ -577,7 +579,8 @@ class ArticleTask(Task):
     def _stats(doc: dict, words: list[str], level: str, llm: LLM,
                repairs: int, dropped: list[str],
                audits: list[dict], clue_fixes: int,
-               exempt: set[str] | None = None) -> dict:
+               exempt: set[str] | None = None,
+               studied: set[str] | None = None) -> dict:
         text = " ".join(
             s.get("en", "")
             for p in doc["paragraphs"] for s in p.get("sentences", [])
@@ -586,7 +589,7 @@ class ArticleTask(Task):
         hit = [w for w in words if _appears(w, text)]
         # 和 check_paragraph 用同一份豁免集合：结果面板报的「超纲词占比」
         # 必须和管线实际拦的东西一致，否则界面说的和实际拦的对不上。
-        report = cefr.scan(text, level, allow=exempt or set(words))
+        report = cefr.scan(text, level, allow=exempt or set(words), studied=studied)
         strength = {"strong": 0, "weak": 0, "none": 0}
         for a in audits:
             strength[a.get("strength") or "none"] += 1
@@ -600,6 +603,9 @@ class ArticleTask(Task):
             # 那个是「本该写进去却没写」，这个是「有意没写」。
             "unplaced": dropped,
             "offender_rate": round(report["offender_rate"], 4),
+            # 学过的词在这篇里又出现了。这是多语境重复真的发生了的唯一证据，
+            # 而它以前完全不可见——要么被判成超纲，要么被修复指令删掉。
+            "revisited": [w for w in report["revisited"] if w not in {x.lower() for x in words}],
             "offenders": report["offenders"][:15],
             "using_real_cefr": report["using_real_data"],
             "repairs": repairs,

@@ -348,7 +348,7 @@ def test_申报的人名不再放行_但会变成修法提示(cefr_table):
 
     #  申报了也照样被判超纲
     problems = ArticleTask().check_paragraph(
-        para, [], "B2", allow=set(), names={"Riverton", "Ashford"})
+        para, [], "B2", allow=set(), studied=set(), names={"Riverton", "Ashford"})
     assert [p.kind for p in problems] == ["too_hard"]
     assert "Riverton" in problems[0].detail
 
@@ -358,48 +358,52 @@ def test_申报的人名不再放行_但会变成修法提示(cefr_table):
     assert "别换掉" in hint
 
     #  没申报过的词就是普通的超纲词，不给这条提示
-    plain = ArticleTask().check_paragraph(para, [], "B2", allow=set(), names=set())
+    plain = ArticleTask().check_paragraph(
+        para, [], "B2", allow=set(), studied=set(), names=set())
     assert "别换掉" not in plain[0].hint
 
 
 # ------------------------------------------------------------- 标成忽略的词
 
-def test_标成忽略的词不再算超纲(fake_llm, happy_responses):
-    """人判一次，永久生效——这是 Lute 那套 status 的用法。
+def test_学过的词不再算超纲(fake_llm, happy_responses):
+    """学过的词出现在下一篇里，是这个产品声称最有效的那个机制，不是问题。
 
-    专有名词没有便宜又可靠的自动判据（人名和普通词大面积同形：Rose、Will、
-    Grace、Hope…），所以这个领域的两种成熟做法都是「做成数据」：
-    Paul Nation 的词表附一张专有名词表，Lute 让用户标一次然后永久生效。
-    这个项目本来就有 status 99「忽略（专有名词等）」和阅读页的 I 键，
-    只是难度标尺从来没读过它。
+    不接上的后果是反着的：nostalgia（C2）、resilient（C1）、threshold
+    （CEFR-J 压根没收）这些学过的词一旦出现在新的 B2 文章里，就会被判超纲、
+    进 too_hard，修复指令要求模型「换成 B2 以内的说法」——**花钱把旧词从新
+    文章里删掉**。本机 24 个词条里有 8 个落在这一类。
     """
     happy_responses["write"] = {"sentences": [{
-        "en": "Nora abandoned the shop, and the silence stayed on for months.",
-        "zh": "Nora 废弃了小店，寂静留了好几个月。",
+        "en": "The shop was abandoned, and a tedious silence filled the room.",
+        "zh": "小店废弃了，一种沉闷的寂静充满房间。",
         "targets": GOOD_PARAGRAPH["sentences"][0]["targets"],
     }]}
 
     _, before, _ = run_pipeline(fake_llm(happy_responses))
-    assert "Nora" in {o["surface"] for o in before["offenders"]}, "前提：不标就会被判超纲"
+    assert "tedious" in {o["surface"] for o in before["offenders"]}, "前提：不认识就会被判超纲"
+    assert before["revisited"] == []
 
-    task = ArticleTask()
     stats = None
-    for ev in task.run(fake_llm(happy_responses),
-                       {"words": ["abandon", "silence"], "level": "B2",
-                        "ignored": {"Nora"}}):
+    for ev in ArticleTask().run(fake_llm(happy_responses),
+                                {"words": ["abandon", "silence"], "level": "B2",
+                                 "studied": {"tedious"}}):
         if ev["type"] == "done":
             stats = ev["stats"]
     assert stats["offenders"] == []
-    assert stats["offender_rate"] == 0.0
+    #  复现的旧词要报出来：这是多语境重复真的发生了的唯一证据，
+    #  而它以前完全不可见——要么被判成超纲，要么被修复指令删掉
+    assert stats["revisited"] == ["tedious"]
+    #  本次的目标词不算「复现」，那是这一篇本来就要教的
+    assert "abandon" not in stats["revisited"]
 
 
-def test_忽略集合脏了也不出错(fake_llm, happy_responses):
+def test_词库集合脏了也不出错(fake_llm, happy_responses):
     """params 是外面传进来的，别假设它一定是一堆干净的字符串。"""
     task = ArticleTask()
-    for junk in (None, [], ["", "  "], [None, 5, {"a": 1}, "Nora"], "Nora"):
+    for junk in (None, [], ["", "  "], [None, 5, {"a": 1}, "tedious"], "tedious"):
         events = list(task.run(fake_llm(happy_responses),
                                {"words": ["abandon", "silence"], "level": "B2",
-                                "ignored": junk}))
+                                "studied": junk}))
         assert events[-1]["type"] == "done", junk
 
 
@@ -525,6 +529,6 @@ def test_不会拿修复预算去删掉目标词本身(cefr_table):
 
     problems = ArticleTask().check_paragraph(
         para, ["abandon", "reluctant"], "B1",
-        allow={"abandon", "reluctant"}, names=set())
+        allow={"abandon", "reluctant"}, studied=set(), names=set())
 
     assert problems == [], [p.as_instruction() for p in problems]

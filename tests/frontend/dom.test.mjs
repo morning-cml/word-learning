@@ -282,6 +282,25 @@ console.log('\n7. 结果面板');
 }
 
 
+/* -------- 复现的旧词 --------
+   学过的词在新文章里又出现，是这个产品声称最有效的机制（多语境重复），
+   可它以前完全不可见：要么被判成超纲列出来，要么被修复指令删掉。 */
+{
+  const ctx = boot('index');
+  const { renderStats } = await import(JS('components/stats.js'));
+  const el = q(ctx, '#stats');
+
+  renderStats(el, { targets_hit: 2, targets_total: 2, word_count: 100, sentence_count: 6,
+                    offender_rate: 0, revisited: ['tedious', 'resilient'] }, ['abandon']);
+  check('复现的旧词被报出来', /tedious/.test(el.textContent) && /resilient/.test(el.textContent));
+  check('说清了它们不计入超纲', /不计入超纲/.test(el.textContent));
+  check('报成好消息而不是问题', el.querySelector('.note.ok') !== null);
+
+  renderStats(el, { targets_hit: 1, targets_total: 1, word_count: 50, sentence_count: 3,
+                    offender_rate: 0 }, ['abandon']);
+  check('老文章没有这个字段时不报', !/以前学过的词/.test(el.textContent));
+}
+
 /* ============================ 阅读器：热键与排版 ============================
    jsdom 没有布局引擎，量不了「面板还盖不盖得住正文」（那条用 puppeteer 量了，
    见 需要注意.md 第 16 条）。这里验的是它验得了的部分：事件流、DOM 状态、

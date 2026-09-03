@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.lexicon import cefr
 from core.store import backup
 from core.store.models import (
-    STATUS_IGNORED, Article, Base, Encounter, Sentence, Word, WordForm, as_utc, utcnow,
+    Article, Base, Encounter, Sentence, Word, WordForm, as_utc, utcnow,
 )
 
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "app.db"
@@ -407,21 +407,33 @@ def set_word_status(s: Session, lemma: str, status: int) -> dict | None:
     return {"lemma": word.lemma, "status": word.status, "status_label": word.status_label}
 
 
-def ignored_lemmas(s: Session) -> set[str]:
-    """用户标成「忽略」的词条（Lute 的 status 99，「专有名词等」）。
+def studied_lemmas(s: Session) -> set[str]:
+    """这个用户词库里已有的词——他自己挑来学、并且已经在语境里读过的那些。
 
-    这个状态一直只是个标签：字段有、按键有（阅读页按 I）、词库页也显示，
-    但难度标尺从来不读它——把 Nora 标成忽略，下一篇生成完全不受影响。
+    难度上限是「读者认不认得」的一个**代用品**：拿 CEFR 等级去猜这个人的
+    词汇量。而对词库里的词，这个应用有直接证据，不需要猜——那些词是用户
+    自己输进来要学的，每一个都配着当时的语境和线索审计结论。
 
-    Lute 那边的做法是判定的依据：它算生词占比时只把 status 0（人从没碰过）
-    算成生词，**凡是人碰过一次的（含 99）就永远不再计入**
-    （见 lute/book/stats.py 的 calc_status_distribution）。
-    专有名词识别没有便宜又可靠的启发式——Paul Nation 的 BNC/COCA 词表
-    干脆随词表附一张专有名词表。两条路都是「做成数据，别去推断」，
-    而这个项目已经有了收集这份数据的入口，只是没接上。
+    不接上的后果是反着的：`nostalgia`（C2）、`resilient`（C1）、`threshold`
+    （CEFR-J 里压根没有）这些学过的词，一旦出现在下一篇 B2 文章里就会被判
+    超纲、进 too_hard，修复指令要求模型「把它换成 B2 以内的说法」——
+    **花钱把旧词从新文章里删掉**。而「同一批词过几天换个题材再生成一篇」的
+    多语境重复，正是这个产品声称最有效的那个机制（见 README 与文库页）。
+    本机 24 个词条里有 8 个（33%）落在这一类。
+
+    不按 status 筛：本机那 8 个词**全都是 status 1**，按「只豁免已掌握(98)」
+    去做在真实数据上覆盖 0 个词，等于没做。而 status 是手动自评，多数词一辈子
+    停在默认的 1。判据用「在不在词库里」——它是行为，不是自评。
+    Lute 也是这么算的：只有 status 0（人从没碰过）才算生词，凡是碰过一次的
+    一律不再计入（lute/book/stats.py 的 calc_status_distribution）。
+
+    这个函数取代了上一版的 ignored_lemmas（只取 status 99）：词库里的词一律
+    豁免，status 99 是它的子集，留两个做同一件事的查询迟早会分叉
+    （需要注意.md 第 20 条）。顺带记一笔：Word 行只由 save_article 从目标词
+    建出来，所以**专有名词根本进不了词库**——「标成忽略」那条路对人名一直
+    是空的，那是另一个缺口，不在这个函数能解决的范围里。
     """
-    rows = s.scalars(select(Word.lemma).where(Word.status == STATUS_IGNORED))
-    return {lemma for lemma in rows if lemma}
+    return {lemma for lemma in s.scalars(select(Word.lemma)) if lemma}
 
 
 def word_stats(s: Session) -> dict:
