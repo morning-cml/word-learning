@@ -30,6 +30,19 @@
 
 /* ------------------------------ 正文 ------------------------------ */
 
+/* 正文栏宽 + 纸张左右留白。两个值分开写是有用的：--sheet-pad 一改，
+   下面那条「面板打开时让位多少」的算式要跟着变，所以它必须是个变量而不是
+   写死在 padding 里的数字。 */
+:root { --sheet-pad: var(--sp-8); }
+
+/* 正文坐在一张纸上，而不是直接坐在页面底色上。
+   tokens.css 里 --surface 的注释一直写着它是「卡片 / **阅读面**」，
+   可阅读页从来没用过它——整个应用最该有「面」的那一屏反而是唯一没有面的。
+   一屏白纸和一屏底色的差别不在好不好看：正文和页面底色同色时，
+   眼睛没有边界可依，读久了更容易累。
+
+   max-width 是「栏宽 + 两边留白」：这样 --reader-measure 仍旧精确等于
+   读者调的那个正文栏宽（一行 66 字符最好读），排版控件的语义不变。 */
 article.doc {
   font-family: var(--serif);
   /* 字号和栏宽由读者自己定（见 .typo 控件），存在 localStorage。
@@ -37,10 +50,15 @@ article.doc {
      下面那条窄屏媒体查询只改默认值，不覆盖用户的选择。 */
   font-size: var(--reader-size, 19px);
   line-height: 1.9;
-  max-width: var(--reader-measure, var(--measure));
+  max-width: calc(var(--reader-measure, var(--measure)) + 2 * var(--sheet-pad));
   margin: 0 auto;
+  padding: var(--sp-7) var(--sheet-pad) var(--sp-8);
   letter-spacing: .003em;
   color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: var(--edge), var(--shadow-2);
 }
 article.doc h1 {
   font-family: var(--serif); font-size: 30px; line-height: 1.25;
@@ -71,32 +89,68 @@ article.doc h1 {
    压在 #1b1a22 的阅读面上几乎看不出来——「哪几个是要学的词」得逐行去找。
    现在直接给字上色：正文里唯一一处彩色文字，扫一眼就能定位。
    底色带留着但换成同色系并压淡，只作为「这是被标记过的」的次要信号。 */
-.tw { position: relative; cursor: pointer; border-radius: 2px; }
+.tw { position: relative; cursor: pointer; border-radius: 3px; }
+/* inline-block 是为了让它能被 transform（揭示那一下要缩放）。
+   目标词永远是单个词，内部本来也不折行，所以不会带来换行上的副作用。 */
 .tw .tw-word {
-  color: var(--target); font-weight: 700; padding: 0 1px;
-  background: linear-gradient(transparent 62%, var(--target-soft) 62%);
+  display: inline-block;
+  color: var(--target); font-weight: 600; padding: 0 1px;
+  border-radius: 3px;
+  /* 荧光笔而不是下划线：压到基线偏上一点，盖住字母下缘但不盖满，
+     像真的用马克笔划过。700 太重了——一页里十个目标词，每个都加粗
+     会把正文压成筛子；600 已经足够跳出来。
+
+     起始位置和浓度都量过：52% 会盖掉行高的整个下半段，一页看下来是一排
+     粉色方块而不是划痕；62% 又太靠下，深色模式里几乎看不见。
+     64% 起、七成浓度，两种主题下都还在「划过一道」的样子上。 */
+  background: linear-gradient(180deg,
+    transparent 64%,
+    color-mix(in srgb, var(--target-soft) 72%, transparent) 64%);
+  transition: background var(--dur-2) var(--ease), transform var(--dur-1) var(--ease-out);
 }
 .tw .tw-blank { display: none; }
-.tw:hover .tw-word { background: var(--target-soft); }
+.tw:hover .tw-word { background: var(--target-soft); transform: translateY(-1px); }
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  .tw .tw-word { background: linear-gradient(180deg, transparent 64%, var(--target-soft) 64%); }
+}
+.tw:active .tw-word { transform: translateY(0); }
 /* 「高亮：关」要连字色一起关掉，否则关了个寂寞 */
-.doc.hide-marks .tw .tw-word { background: none; font-weight: inherit; color: inherit; }
+.doc.hide-marks .tw .tw-word { background: none; font-weight: inherit; color: inherit; transform: none; }
 
 /* 回忆模式：挖空，逼你先检索再验证 */
 .doc.mode-cloze .tw .tw-word { display: none; }
+/* 空格做成一个**凹进去的槽**：内投影 + 压暗的底。
+   它要看起来是「这里少了一块」，而不是「这里涂了一块颜色」——
+   前者才会让人想去把它填上。 */
 .doc.mode-cloze .tw .tw-blank {
   display: inline-block; font-family: var(--mono); font-weight: 700;
   /* 和揭示后的词同色：挖空和它底下的答案是同一个东西，
      换个颜色会让人以为「揭示」这个动作改变了什么 */
   color: var(--target); background: var(--target-soft);
-  border-radius: 3px; padding: 0 2px; letter-spacing: -.04em;
+  border-radius: 4px; padding: 0 3px; letter-spacing: -.04em;
+  box-shadow: inset 0 1px 2px rgba(72, 54, 32, .16);
+  transition: transform var(--dur-1) var(--ease-out), filter var(--dur-1) var(--ease);
 }
-.doc.mode-cloze .tw:hover .tw-blank { filter: brightness(.94); }
-.doc.mode-cloze .tw.revealed .tw-word  { display: inline; }
+.doc.mode-cloze .tw:hover .tw-blank { filter: brightness(.96); transform: translateY(-1px); }
+.doc.mode-cloze .tw:active .tw-blank { transform: translateY(1px) scale(.98); }
+.doc.mode-cloze .tw.revealed .tw-word  { display: inline-block; }
 .doc.mode-cloze .tw.revealed .tw-blank { display: none; }
-.doc.mode-cloze .tw.just-revealed .tw-word { animation: pop .7s var(--ease); }
-@keyframes pop {
-  0%   { background: var(--target); color: var(--on-accent); border-radius: 3px; }
-  100% { background: linear-gradient(transparent 62%, var(--target-soft) 62%); }
+
+/* 揭示的那一下。这是整个应用里最该有反馈的一个动作——**主动检索**
+   是回忆模式存在的全部理由，而检索成功的那一刻现在什么都没有发生。
+
+   原来是一条 pop 关键帧，从 `background: 颜色` 动到 `background: 渐变`。
+   这两者浏览器插值不了（`<color>` 和 `<image>` 之间没有中间态），
+   实际表现是中途硬跳一下——写了动画，但没有动画。
+   现在动的是 transform 和 box-shadow 的扩散半径，都是能插值的量：
+   词从小一点弹到位，同时一圈暖色光晕向外扩散并淡出。 */
+.doc.mode-cloze .tw.just-revealed .tw-word {
+  animation: reveal-word .52s var(--ease-spring) both;
+}
+@keyframes reveal-word {
+  0%   { transform: scale(.86); box-shadow: 0 0 0 0 var(--target-soft); }
+  55%  { transform: scale(1.06); box-shadow: 0 0 0 8px var(--target-soft); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 14px transparent; }
 }
 
 /* ------------------------------ 词条面板 ------------------------------ */
@@ -105,12 +159,23 @@ article.doc h1 {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 60;
   width: min(430px, 92vw);
   background: var(--surface); border-left: 1px solid var(--line);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-3);
   transform: translateX(101%);
-  transition: transform .22s var(--ease);
+  /* 进出用两条不同的曲线：进来带一点点过冲（--ease-spring），
+     像抽屉推到底轻轻一顿；出去纯 ease-out，干脆收走不回弹——
+     回弹着离开会让人以为它还要回来。 */
+  transition: transform var(--dur-3) var(--ease-out);
   overflow-y: auto;
+  overscroll-behavior: contain;   /* 面板滚到底不要带着正文一起滚 */
 }
-.panel.open { transform: none; }
+.panel.open { transform: none; transition-timing-function: var(--ease-spring); }
+
+/* 面板里的内容跟着晚一点点进来。整块一起滑进来是「一个板子」，
+   内容稍稍落后是「板子上摆着东西」——差别就在这 60ms 上。 */
+.panel.open .panel-inner { animation: panel-content .34s var(--ease-out) 60ms both; }
+@keyframes panel-content {
+  from { opacity: 0; transform: translateX(10px); }
+}
 .panel-inner { padding: var(--sp-5) var(--sp-5) var(--sp-8); }
 .panel-close {
   position: absolute; top: 12px; right: 14px;
@@ -155,9 +220,18 @@ article.doc h1 {
   padding-left: 9px; border-left: 2px solid var(--ok);
 }
 
+/* 这篇的数据。跟着纸对齐而不是跟着正文栏——它是纸下面的一张卡，
+   两者左右缘不齐会看出来。原先这几个值写成模板里的内联样式，
+   而 CLAUDE.md 明说组件样式要进 CSS：内联的那份第二个页面想复用时只能复制。 */
+.reader-stats {
+  max-width: calc(var(--reader-measure, var(--measure)) + 2 * var(--sheet-pad));
+  margin: var(--sp-6) auto 0;
+}
+
 @media (max-width: 820px) {
-  article.doc { font-size: var(--reader-size, 17.5px); }
-  .reader-body { padding: var(--sp-5) var(--sp-4) var(--sp-7); }
+  :root { --sheet-pad: var(--sp-4); }   /* 窄屏上纸的留白要收，否则栏宽被挤没 */
+  article.doc { font-size: var(--reader-size, 17.5px); padding: var(--sp-5) var(--sheet-pad) var(--sp-6); }
+  .reader-body { padding: var(--sp-4) var(--sp-3) var(--sp-7); }
 }
 
 /* 面板打开时把正文推开，而不是盖在它上面。
@@ -187,7 +261,10 @@ article.doc h1 {
        窗口一点不让、白白被盖掉 260px，而它明明还能让出 146px。
        窗口再窄时第三个值变成负数，clamp 取第一个值归零——面板本来就是
        92vw 的抽屉了，让位没有意义。 */
-    --half: calc(var(--reader-measure, var(--measure)) / 2);
+    /* 算的是**纸的**半宽而不是正文栏的半宽：会被面板盖住的是那张纸的右缘，
+       它比正文栏还宽出一个 --sheet-pad。用栏宽算就会少让 64px，
+       而少让的那一截正好是行末——读到那里眼睛要往回找，是最难受的位置。 */
+    --half: calc((var(--reader-measure, var(--measure)) + 2 * var(--sheet-pad)) / 2);
     transform: translateX(calc(-1 * clamp(
       0px,
       var(--half) + 430px + var(--sp-5) - 50vw,

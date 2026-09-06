@@ -21,6 +21,29 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 纸纹。整屏纯色是这套界面最像「管理后台」的一处，铺一层极淡的噪声，
+   底色就从「一块颜色」变成「一张纸」。
+
+   ::before 而不是给 body 加 background-image：噪声要走 mix-blend-mode 才
+   融得进底色（浅色 multiply 压出纤维感、深色 overlay 提出颗粒感），
+   而 background 的多个图层之间没有混合模式可用。
+
+   盖在内容**之上**而不是垫在底下。垫在底下的话只有页面底色有纹理，
+   卡片和阅读页那张纸反而是光滑的——而它们才是最该像纸的东西。
+   3.5% 的强度对文字是看不出来的，对大片平色才显出纤维。
+
+   fixed + 不吃指针事件：纹理不跟着滚。纸在玻璃底下，跟着内容滚会晕。 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 200;          /* 面板 60、toast 90 之上；它是整块玻璃，不该被谁盖住 */
+  pointer-events: none;
+  background-image: var(--grain);
+  opacity: var(--grain-strength);
+  mix-blend-mode: var(--grain-blend);
+}
+
 h1, h2, h3 { color: var(--text); line-height: 1.3; margin: 0 0 var(--sp-3); }
 h1 { font-size: 27px; letter-spacing: -.015em; }
 h2 { font-size: 18px; }
@@ -107,19 +130,31 @@ code {
 
 /* ============================== 卡片 ============================== */
 
+/* 卡片是这套界面里出现最多的那个面，所以「它是什么做的」基本就决定了
+   整个应用的质感。三样东西一起才立得住，缺一样就塌回色块：
+     · 顶边高光（--edge）—— 光从上面来，上沿要亮一点点；
+     · 三层叠加的暖调投影 —— 接触影 + 主影 + 环境影（见 tokens.css）；
+     · 极淡的竖向渐变 —— 一整块死平的颜色不像纸，上亮下沉才有厚度。
+   注释里以前就写着「卡片顶部一道极细的高光」，但规则一直只有
+   position: relative——写了意图没写实现，这次补上。 */
 .card {
-  background: var(--surface);
+  position: relative;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--surface) 97%, var(--text)) 0%,
+      var(--surface) 46%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: var(--sp-5);
   margin-bottom: var(--sp-4);
-  box-shadow: var(--shadow);
+  box-shadow: var(--edge), var(--shadow-1);
+}
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  .card { background: var(--surface); }
 }
 .card > :last-child { margin-bottom: 0; }
-/* 卡片顶部一道极细的高光，暗色下卡片才有「面」而不是一块色块 */
-.card { position: relative; }
-.card.lift { transition: transform .16s var(--ease), box-shadow .16s var(--ease); }
-.card.lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+.card.lift { transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out); }
+.card.lift:hover { transform: translateY(-2px); box-shadow: var(--edge), var(--shadow-2); }
 .card-head {
   display: flex; align-items: baseline; gap: var(--sp-3);
   margin-bottom: var(--sp-3);
@@ -134,15 +169,31 @@ code {
 
 /* ============================== 按钮 ============================== */
 
+/* 按钮是这套界面里唯一「按下去」的东西，所以它得有按下去的样子。
+   三态各有各的位移：静止贴着面、悬停抬 1px、按下沉到 1px 并把外投影换成
+   内投影——那一下的位移和影子反向，手感就从「颜色变了」变成「东西动了」。
+   位移只给 1px：再多就成了玩具。 */
 button, .btn {
   font-family: inherit; font-size: 14px; font-weight: 500;
   padding: 8px 16px; border-radius: var(--radius-sm);
   border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
-  cursor: pointer; transition: background .15s var(--ease), border-color .15s var(--ease),
-                              opacity .15s var(--ease);
+  cursor: pointer;
+  box-shadow: var(--edge), var(--shadow-1);
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
+              box-shadow var(--dur-1) var(--ease), transform var(--dur-1) var(--ease-out),
+              opacity var(--dur-1) var(--ease);
 }
-button:hover:not(:disabled), .btn:hover { border-color: var(--faint); }
-button:disabled { opacity: .5; cursor: not-allowed; }
+button:hover:not(:disabled), .btn:hover {
+  border-color: var(--faint);
+  transform: translateY(-1px);
+  box-shadow: var(--edge), var(--shadow-2);
+}
+button:active:not(:disabled), .btn:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(72, 54, 32, .13);
+  transition-duration: 40ms;      /* 按下要跟手，回弹才慢慢来 */
+}
+button:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; transform: none; }
 button:focus-visible, .btn:focus-visible, a:focus-visible, input:focus-visible,
 select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
@@ -158,11 +209,36 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
 .btn-sm { padding: 4px 10px; font-size: 12.5px; }
 .btn-ghost { background: transparent; }
 
-/* 分段控件 */
-.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
-.segmented button { border: none; border-radius: 0; background: var(--surface); padding: 6px 14px; }
-.segmented button + button { border-left: 1px solid var(--line); }
-.segmented button.on { background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+/* 分段控件。阅读页四种模式全靠它，是这个应用被点得最多的控件，
+   所以照实体分段开关做：**凹进去的轨道 + 浮起来的滑块**。
+   轨道用内投影，选中项用外投影 + 顶边高光，两者反向，
+   「哪个是当前档」不用读颜色就看得出来。 */
+.segmented {
+  display: inline-flex; padding: 3px; gap: 2px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  box-shadow: inset 0 1px 3px rgba(72, 54, 32, .1);
+}
+.segmented button {
+  border: none; border-radius: 6px; background: transparent; color: var(--muted);
+  padding: 5px 13px; box-shadow: none;
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease),
+              transform var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+}
+.segmented button:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--surface) 55%, transparent); transform: none; box-shadow: none; }
+.segmented button:active:not(:disabled) { transform: scale(.96); box-shadow: none; }
+.segmented button.on {
+  background: var(--accent-fill); color: var(--on-accent); font-weight: 600;
+  box-shadow: var(--edge), var(--shadow-1);
+}
+.segmented button.on:hover { background: var(--accent-fill); color: var(--on-accent); }
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  .segmented button:hover:not(:disabled) { background: var(--surface); }
+}
+
+/* 平背景的按钮不要那套「实体」处理：它们本来就是「一段可点的文字」 */
+.btn-ghost, .panel-close, .typo-reset { box-shadow: none; }
+.btn-ghost:hover:not(:disabled) { box-shadow: none; }
 
 /* ============================== 表单 ============================== */
 
@@ -223,6 +299,20 @@ button.chip { cursor: pointer; }
   padding: var(--sp-3) var(--sp-4) var(--sp-3);
   background: var(--surface-2); border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm); overflow: hidden;
+  box-shadow: var(--edge);
+  /* 一块块落下来。这几个数字是一次生成跑完之后才出现的，
+     是「交付」的那一刻——齐刷刷地一起冒出来和一块块落到位，
+     后者才有「做完了」的意思。40ms 的间隔刚好够看出先后，又不拖沓。 */
+  animation: stat-in .38s var(--ease-spring) both;
+}
+.stats .stat:nth-child(1) { animation-delay: 0ms; }
+.stats .stat:nth-child(2) { animation-delay: 40ms; }
+.stats .stat:nth-child(3) { animation-delay: 80ms; }
+.stats .stat:nth-child(4) { animation-delay: 120ms; }
+.stats .stat:nth-child(5) { animation-delay: 160ms; }
+.stats .stat:nth-child(6) { animation-delay: 200ms; }
+@keyframes stat-in {
+  from { opacity: 0; transform: translateY(8px) scale(.97); }
 }
 .stat::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
@@ -269,8 +359,15 @@ button.chip { cursor: pointer; }
 .table .tight .hint { white-space: nowrap; }
 .table td { padding: var(--sp-3); border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: none; }
-.table tbody tr { transition: background .12s var(--ease); }
-.table tbody tr:hover { background: var(--surface-2); }
+/* 行悬停加一条左侧色条。整行变底色只说明「鼠标在这儿」，
+   而这两张表的行都是可以点开的——色条是那个「可以进去」的信号。
+   用 box-shadow 画而不是 border-left：border 会占宽度，
+   一悬停整行内容左移 3px，扫过一列就是一片抖动。 */
+.table tbody tr { transition: background .12s var(--ease), box-shadow .12s var(--ease); }
+.table tbody tr:hover {
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 /* 行内的操作按钮平时收起来。原先每行最亮的元素是那个红色「删除」，
    而删除恰恰是这张表最不该被先看到的东西。 */
 .table tbody tr .row-act { opacity: 0; transition: opacity .12s var(--ease); }
@@ -307,14 +404,32 @@ button.chip { cursor: pointer; }
   padding: 10px 16px; border-radius: var(--radius-sm);
   background: var(--surface); border: 1px solid var(--line);
   box-shadow: var(--shadow-lg); font-size: 13.5px; color: var(--text);
-  animation: toast-in .18s var(--ease);
-  transition: opacity .25s var(--ease), transform .25s var(--ease);
+  animation: toast-in .3s var(--ease-spring);
+  transition: opacity .25s var(--ease-out), transform .25s var(--ease-out);
 }
 .toast.ok  { border-left: 3px solid var(--ok); }
 .toast.bad { border-left: 3px solid var(--bad); }
 .toast.warn{ border-left: 3px solid var(--warn); }
 .toast.leaving { opacity: 0; transform: translateY(6px); }
-@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(.96); } }
+
+/* ============================== 少动一点 ==============================
+   系统里开了「减少动态效果」的人，多半是因为动效会让他们不适（前庭功能、
+   偏头痛、注意力）。这里不是把动画调慢，是**全部关掉位移类的东西**，
+   只留下颜色变化——那一类不引起不适，而且它承载的是状态信息，关掉会丢东西。
+
+   放在文件末尾附近、用 !important：这条要盖住上面每一处动画，
+   包括以后新加的。漏掉一条，对需要它的人来说就是整条规则没生效。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .progress-fill::after { display: none; }
+  .spinner { animation: none; border-right-color: currentColor; opacity: .5; }
+}
 
 /* ============================== 进度条 ==============================
    时间线回答「在干什么」，进度条回答「还要多久」——后者才是决定
@@ -329,13 +444,29 @@ button.chip { cursor: pointer; }
   background: var(--surface-2); border: 1px solid var(--line-soft);
 }
 .progress-fill {
+  position: relative; overflow: hidden;
   height: 100%; width: 0;
   background: linear-gradient(90deg, var(--accent-fill), var(--accent));
   border-radius: 3px;
   transition: width .9s linear;
 }
+/* 条子上滑过一道光。这不是装饰：一次模型调用 30-40 秒，那段时间里条子
+   本来就几乎不动（inflight 只给到下一格的 95%），而**一条不动的进度条
+   和一条卡死的进度条长得一模一样**。有东西在动，就说明它还活着。
+   跑完 / 出错就停掉——那时候「还活着」已经不是要传达的信息了。 */
+.progress-fill::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg,
+    transparent 0%, rgba(255, 255, 255, .34) 50%, transparent 100%);
+  animation: progress-sheen 1.9s var(--ease) infinite;
+}
+@keyframes progress-sheen {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
 .progress-fill.done { background: var(--ok-fill); transition: width .3s var(--ease); }
 .progress-fill.bad  { background: var(--bad-fill); }
+.progress-fill.done::after, .progress-fill.bad::after { animation: none; opacity: 0; }
 .progress-legend {
   display: flex; align-items: baseline; gap: var(--sp-3);
   margin-top: 7px; font-size: 12.5px; color: var(--muted);
@@ -348,18 +479,46 @@ button.chip { cursor: pointer; }
    生成一篇要跑 4-9 次模型调用、一两分钟。转圈圈的体验很差，所以把管线的
    每个阶段都摊开显示；正在跑的那一步高亮，跑完的收成一行。 */
 
-.timeline { display: flex; flex-direction: column; gap: 2px; }
+/* 一条脊线把各步串起来。没有它，七行就是七件互不相干的事；
+   有了它才读得出「这是一条正在往下走的流水线」——而生成要跑一两分钟，
+   「它走到哪儿了」正是这一两分钟里唯一想知道的事。
+   侧栏那个「它会做四件事」用的是同一个画法，两处该一致。 */
+.timeline { position: relative; display: flex; flex-direction: column; gap: 2px; }
+.timeline::before {
+  content: ""; position: absolute; left: 17px; top: 16px; bottom: 16px;
+  width: 1px; background: var(--line-soft);
+}
 .step {
+  position: relative;
   display: flex; gap: var(--sp-3); align-items: baseline;
   padding: 7px 10px; border-radius: var(--radius-sm);
   font-size: 13.5px; color: var(--muted);
+  /* 每一行是被 JS 一条条追加进来的，所以这条动画天然就是「逐条落下」，
+     不用排 delay。往下落而不是淡入：时间线是自上而下长出来的，
+     方向对上了才读得出「又完成了一步」。 */
+  animation: step-in .26s var(--ease-out) both;
+  transition: background var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+}
+@keyframes step-in {
+  from { opacity: 0; transform: translateY(-5px); }
 }
 .step .dot {
   flex: none; width: 16px; text-align: center;
   font-family: var(--mono); font-size: 11px; color: var(--faint);
+  /* 不透明底把脊线打断，节点才是「串在线上的一颗」而不是「线从字上穿过去」。
+     底色跟着所在行走：active 行的底是 --surface-2，用 --surface 会露出一个亮圈。 */
+  position: relative;
+  background: var(--surface);
+  border-radius: var(--radius-pill);
 }
+.step.active .dot { background: var(--surface-2); }
 .step .body { flex: 1; min-width: 0; }
-.step.active { background: var(--surface-2); color: var(--text); }
+/* 正在跑的那一步：左侧一道品牌色的短条 + 底色。转圈只说明「有东西在转」，
+   色条说明的是「就是这一行」——扫一眼就定位得到，不用找哪个在转。 */
+.step.active {
+  background: var(--surface-2); color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .step.active .dot { color: var(--accent); }
 .step.done .dot  { color: var(--ok); }
 .step.bad        { color: var(--bad); }
