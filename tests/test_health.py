@@ -59,12 +59,39 @@ def test_定标文本同时含强线索与无线索的词():
 
 
 def test_L4_用的是真正在跑的那段_prompt():
-    """在 health.py 里另抄一份 prompt，就变成「校验通过但实际审计仍然失灵」。"""
+    """在 health.py 里另抄一份 prompt，就变成「校验通过但实际审计仍然失灵」。
+
+    认领那一步同样不能另抄：它曾经是自己拿 lemma 做字典查（= 字符串相等），
+    而真管线用的是 same_word。判据一分叉，L4 测的就是别的东西了。
+    """
     import inspect
 
     src = inspect.getsource(health._calibrate)
     assert "from tasks.article.prompts import audit_prompt" in src
     assert "coerce_audits" in src
+    assert "claim_audits" in src, "认领必须复用管线那一份，不能在这里另立判据"
+
+
+def test_模型回屈折形时_L4_不报漏审():
+    """问它 tedious、它回 tediously，真管线认得出（`claim_audits`），
+    L4 原来认不出——于是对着一个**管线明明处理得了**的返回值报
+    「漏审了 tedious、meticulous」，把整次检验判成没过，
+    还附一句「每段多烧一次补线索调用」，而那句话是错的。
+
+    这一层存在的全部理由是「测真正会跑的那段」；比真管线严，
+    它拦下的就是模型本来干得了的活。
+    """
+    inflected = {"tediously": "none", "meticulously": "strong"}
+    assert health._calibrate(Verdicts(inflected)) == {
+        "tedious": "none", "meticulous": "strong"}
+    assert problems(inflected) == []
+
+
+def test_屈折形认领不会把真漏审也放过去():
+    """放宽认领判据不能顺手把「审计确实漏了」也一起放行——
+    漏审在真管线里会被按最坏情况兜底，每段多烧一轮补线索，该报还得报。"""
+    assert problems({"meticulously": "strong"}) == ["漏审"]
+    assert problems({"tediousness": "none"}) == ["漏审"]
 
 
 def test_没填_Key_时不发请求():

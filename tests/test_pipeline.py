@@ -124,6 +124,20 @@ assign = ArticleTask._assign_words
     ("模型改了大小写，以用户拼写为准",
      [{"words": ["Abandon", "SILENCE"]}], ["abandon", "silence"], [],
      ([["abandon", "silence"]], [])),
+    # 对不上的不止大小写。只比字面的话，下面这三条里的词全都认不上，
+    # 会被当成 forgotten 补进最后一段——分配等于没做。
+    ("模型回了屈折形，仍然是同一个词",
+     [{"words": ["abandoned", "silence"]}], ["abandon", "silence"], [],
+     ([["abandon", "silence"]], [])),
+    ("用户输的是变形、模型规范成了原形",
+     [{"words": ["study", "silence"]}], ["studies", "silence"], [],
+     ([["studies", "silence"]], [])),
+    ("全都回成屈折形，不会统统挤进最后一段",
+     [{"words": ["abandoned"]}, {"words": ["silences"]}], ["abandon", "silence"], [],
+     ([["abandon"], ["silence"]], [])),
+    ("屈折形抢不走已经被认走的那个词",
+     [{"words": ["abandon", "abandoned", "silence"]}], ["abandon", "silence"], [],
+     ([["abandon", "silence"]], [])),
     ("模型说塞不进就不硬塞",
      [{"words": ["abandon", "silence"]}], ["abandon", "silence", "fragile"], ["fragile"],
      ([["abandon", "silence"]], ["fragile"])),
@@ -147,6 +161,21 @@ def test_词分配(name, planned, words, unplaced, expect):
 
 def test_保留段落的其它键():
     assert assign([{"focus": "深夜电台", "words": ["a"]}], ["a"], [])[0][0]["focus"] == "深夜电台"
+
+
+def test_认领模型回声用的是全项目同一个判据():
+    """`_normalize` 和 `claim_audits` 都拿 same_word 认领模型的回声，
+    选题这一步原来只比字面——同一个语义判断两处两套判据，迟早分叉
+    （需要注意.md 第 2d、20 条）。这条钉的是「三处用的是同一个」。"""
+    import inspect
+
+    from core.lexicon.lemma import same_word
+
+    for fn in (ArticleTask._assign_words, ArticleTask._normalize, ArticleTask.claim_audits):
+        assert "same_word" in inspect.getsource(fn), fn.__name__
+    # 判据本身是有方向的：认得出屈折形，但不能把异干替补也算进来
+    assert same_word("abandon", "abandoned") and same_word("studies", "study")
+    assert not same_word("better", "good")
 
 
 def test_幻觉词不烧修复预算(fake_llm, happy_responses):

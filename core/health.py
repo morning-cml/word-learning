@@ -209,19 +209,31 @@ def check(provider_id: str, model: str, api_key: str) -> dict[str, Any]:
 
 
 def _calibrate(llm: LLM) -> dict[str, str]:
-    """跑一次真实的审计调用，返回 {lemma: strength}。
+    """跑一次真实的审计调用，返回 {定标词: strength}。没认领上的词不出现。
 
-    刻意 import 任务层的 prompt 和归一函数，而不是在这里另抄一份：
+    刻意 import 任务层的 prompt、归一函数**和认领判据**，而不是在这里另抄一份：
     抄一份就变成「校验通过但实际审计仍然失灵」——测的必须是真正会跑的那段。
+
+    认领这一步曾经是自己做的（`{a["lemma"]: ...}` 再拿定标词去查字典），
+    也就是回到了字符串相等。而模型回屈折形是这条链上最常见的一种偏差——
+    问它 meticulous，它回 meticulously——真管线为此专门用 same_word 认领
+    （见 ArticleTask.claim_audits）。两边判据一分叉，L4 就会对着一个
+    **管线明明处理得了**的返回值报「漏审了 tedious、meticulous」，
+    把整次检验判成没过，还附一句「每段多烧一次补线索调用」——那句话是错的。
+    检验比被检验的代码更不能有自己的假设（需要注意.md 第 2d、20 条）。
     """
     from tasks.article.prompts import audit_prompt
     from tasks.article.schema import AUDIT_SCHEMA, coerce_audits
+    from tasks.article.task import ArticleTask
 
     audits = coerce_audits(llm.json(
         audit_prompt(CALIBRATION_TEXT, CALIBRATION_WORDS),
         purpose="structured", max_tokens=2500, json_schema=AUDIT_SCHEMA,
     ))
-    return {a["lemma"].lower(): a["strength"] for a in audits}
+    picked = ArticleTask.claim_audits(CALIBRATION_WORDS, audits)
+    # 认不上的留空而不是兜底成 none：这里要分得出「模型说没线索」和
+    # 「模型压根没答」，下面 L4 对这两件事报的是不同的问题。
+    return {word: got["strength"] for word, got in zip(CALIBRATION_WORDS, picked) if got}
 
 
 def _sentences(doc: Any) -> list[dict]:

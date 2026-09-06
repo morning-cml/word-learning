@@ -119,6 +119,16 @@ class ArticleTask(Task):
         以用户给的拼写为准：下游的 allow、_appears、以及入库的词条 key
         都按它对齐，用模型回声里的大小写会对不上。
 
+        **对不上的不止大小写。** 认领分两遍——先让字面相同的认完，再让屈折形
+        去认剩下的（`same_word`，这个项目对「是不是同一个词」的既定判据，
+        `_normalize` 认领模型标的 lemma 用的就是它）。只比字面的话，模型
+        把 abandon 回成 abandoned、或者把用户输入的 studies 规范成 study，
+        这个词就认不上了——而认不上的词会被当成 forgotten **统统补进最后一段**。
+        全都对不上时，那一段要独扛全部目标词：check_paragraph 逐个要求它们出现，
+        两次修复烧完还是不达标，线索审计再对着十几个词跑两轮补线索。
+        产出的是一篇质量塌掉的文章，而用户看到的是「生成完成」
+        （需要注意.md 第 2d、20 条：同一个语义判断在两处用了两套判据）。
+
         unplaced 是模型自己说「这批词里这几个塞不进这个题材」。prompt 里写着
         「别硬塞——硬塞会毁掉整篇的可读性」，但代码一直在硬塞：漏掉的词
         统统补回最后一段。结果是一篇被稀释过的文章，而用户看到的是「生成完成」。
@@ -129,15 +139,27 @@ class ArticleTask(Task):
         for word in words:
             canonical.setdefault(word.lower(), word)      # 同一个词以首次出现的拼写为准
         taken: set[str] = set()
-        cleaned: list[dict] = []
-        for para in planned:
-            keep = []
-            for raw in para["words"]:
-                key = raw.lower()
-                if key in canonical and key not in taken:
-                    taken.add(key)
-                    keep.append(canonical[key])
-            cleaned.append({**para, "words": keep})
+        # 每段一排槽位，位置和模型给的顺序一一对应——两遍认领之后再压平，
+        # 这样第二遍不会打乱段内顺序。认不上的位置留 None，最后丢掉。
+        slots: list[list[str | None]] = [[None] * len(p["words"]) for p in planned]
+
+        def claim(match) -> None:
+            for p_i, para in enumerate(planned):
+                for w_i, raw in enumerate(para["words"]):
+                    if slots[p_i][w_i] is not None:
+                        continue
+                    key = next(
+                        (k for k in canonical if k not in taken and match(k, raw)), None)
+                    if key is not None:
+                        taken.add(key)
+                        slots[p_i][w_i] = canonical[key]
+
+        # 先字面、再屈折形：否则一个屈折形可能抢走另一个词正好要用的那条，
+        # 和 claim_audits 里那两遍是同一个道理。
+        claim(lambda key, raw: key == raw.lower())
+        claim(lambda key, raw: same_word(canonical[key], raw))
+        cleaned = [{**p, "words": [w for w in row if w]}
+                   for p, row in zip(planned, slots)]
         leftover = [w for key, w in canonical.items() if key not in taken]
         declined = {u.lower() for u in unplaced}
         dropped = [w for w in leftover if w.lower() in declined]
@@ -215,6 +237,48 @@ class ArticleTask(Task):
     # -------------------------------------------------------------- 语境线索审计
 
     @staticmethod
+    def claim_audits(expected: list[str], audits: list[dict]) -> list[dict | None]:
+        """把模型回的每条结论认领到某个目标词上。认不上的位置留 None。
+
+        原来是拿 lemma 做字符串相等。模型经常回一个屈折形——问它
+        meticulous，它回 meticulously——于是这个词被当成「漏审」，
+        按最坏情况兜底成 none，接着发生的事一件比一件糟：
+          · 一段本来线索充分的段落挨两轮补线索改写（4 次多余调用，两分多钟），
+            而改写只可能让它变差；
+          · 结果面板把它报成「语境线索充分 0/1」——正好反了。
+        而线索强度是这个项目唯一用来自我监测的仪表（见 SENTENCE_SCAFFOLD
+        上面那段），仪表本身读反了，「错了会响」这条前提就不成立了。
+
+        same_word 是这个项目对「这是不是同一个词」的既定判据，_appears 和
+        cefr.scan 用的都是它。这里没有理由另立一套（见 需要注意.md 第 6 条）。
+        两遍：先让字面相同的认领完，再让屈折形去认剩下的——否则一个屈折形
+        可能抢走另一个词正好要用的那条。认领过的从池子里拿走，
+        一条结论只能算到一个词头上，不然 clue_strength 的分母会虚高。
+
+        **单独成一个函数是因为它有第二个调用方**：`core/health.py` 的 L4
+        校准。那一层原来自己拿 `{lemma: strength}` 做字典查，也就是回到了
+        字符串相等——于是模型回一个屈折形时，L4 报「漏审了 tedious、
+        meticulous」并把整次检验判成没过，而同样的返回值在真管线里是认得出的。
+        L4 存在的全部意义是「测真正会跑的那段」（见 _calibrate 的注释），
+        判据分叉了就测的是别的东西（需要注意.md 第 2d、20 条）。
+        """
+        picked: list[dict | None] = [None] * len(expected)
+        pool = list(audits)
+
+        def claim(match) -> None:
+            for i, word in enumerate(expected):
+                if picked[i] is not None:
+                    continue
+                for j, audit in enumerate(pool):
+                    if match(word, audit["lemma"]):
+                        picked[i] = pool.pop(j)
+                        break
+
+        claim(lambda word, lemma: word.lower() == lemma.lower())
+        claim(same_word)
+        return picked
+
+    @staticmethod
     def audit_clues(llm: LLM, para: dict, expected: list[str]) -> list[dict]:
         """让模型扮演不认识这些词的读者，逐个判断能否从上下文推断词义。
 
@@ -230,37 +294,7 @@ class ArticleTask(Task):
             prompts.audit_prompt(text, expected),
             purpose="structured", max_tokens=2500, json_schema=AUDIT_SCHEMA,
         ))
-
-        # 把模型回的每条结论认领到某个目标词上。
-        #
-        # 原来是拿 lemma 做字符串相等。模型经常回一个屈折形——问它
-        # meticulous，它回 meticulously——于是这个词被当成「漏审」，
-        # 按最坏情况兜底成 none，接着发生的事一件比一件糟：
-        #   · 一段本来线索充分的段落挨两轮补线索改写（4 次多余调用，两分多钟），
-        #     而改写只可能让它变差；
-        #   · 结果面板把它报成「语境线索充分 0/1」——正好反了。
-        # 而线索强度是这个项目唯一用来自我监测的仪表（见 SENTENCE_SCAFFOLD
-        # 上面那段），仪表本身读反了，「错了会响」这条前提就不成立了。
-        #
-        # same_word 是这个项目对「这是不是同一个词」的既定判据，_appears 和
-        # cefr.scan 用的都是它。这里没有理由另立一套（见 需要注意.md 第 6 条）。
-        # 两遍：先让字面相同的认领完，再让屈折形去认剩下的——否则一个屈折形
-        # 可能抢走另一个词正好要用的那条。认领过的从池子里拿走，
-        # 一条结论只能算到一个词头上，不然 clue_strength 的分母会虚高。
-        picked: list[dict | None] = [None] * len(expected)
-        pool = list(audits)
-
-        def claim(match) -> None:
-            for i, word in enumerate(expected):
-                if picked[i] is not None:
-                    continue
-                for j, audit in enumerate(pool):
-                    if match(word, audit["lemma"]):
-                        picked[i] = pool.pop(j)
-                        break
-
-        claim(lambda word, lemma: word.lower() == lemma.lower())
-        claim(same_word)
+        picked = ArticleTask.claim_audits(expected, audits)
 
         # lemma 一律改回用户给的那个词：下游 save_article 是按目标词的 lemma
         # 去 audits 里找线索的，留着模型的回声会挂不上，这一处语境就没有线索了。
