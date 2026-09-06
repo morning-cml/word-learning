@@ -22,6 +22,30 @@
 @supports not (background: color-mix(in srgb, red 50%, blue)) {
   .reader-bar { background: var(--bg); }
 }
+/* 阅读进度。滚动时间线花在这里，比花在正文入场上值得多：
+   读长文时「还剩多少」是个真需求，而它不碰一个字。
+
+   纯 CSS——`animation-timeline: scroll()` 把整篇文档的滚动进度直接接到
+   scaleX 上，不用 scroll 监听、不占主线程，和滚动本身一样跟手。
+   （页面上已经有一个 scroll 监听在存阅读位置了，那条是必须的；
+   这条要是也用 JS，就是同一帧里第二次读布局。）
+
+   贴在工具条下沿，和它的下边框重合：进度是「这一栏的状态」，
+   不该另占一条高度。@supports 兜底——不支持就没有这条线，不影响别的。 */
+@supports (animation-timeline: scroll()) {
+  .reader-bar::after {
+    content: "";
+    position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+    transform-origin: 0 50%; transform: scaleX(0);
+    background: linear-gradient(90deg, var(--accent-fill), var(--accent));
+    animation: read-progress linear both;
+    animation-timeline: scroll(root block);
+  }
+  @keyframes read-progress { to { transform: scaleX(1); } }
+  /* 专注模式下工具条会压淡到 38%，进度条得自己保持看得清 */
+  body.focus-mode .reader-bar::after { opacity: 1; }
+}
+
 .reader-bar .spacer { flex: 1; }
 .bar-hint { font-size: 12.5px; color: var(--faint); }
 .cloze-progress { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
@@ -65,7 +89,20 @@ article.doc h1 {
   margin: var(--sp-4) 0 var(--sp-1); letter-spacing: -.015em;
 }
 .doc-sub { font-family: var(--sans); font-size: 14px; color: var(--muted); margin-bottom: var(--sp-6); }
-.para { margin: 0 0 1.4em; }
+.para {
+  margin: 0 0 1.4em;
+  /* 按整段排版断行，不留孤字尾行。浏览器会回溯前几行来让最后一行不至于
+     只剩一个词——正文一共就几段，这点代价换来的是每一段都收得干净。 */
+  text-wrap: pretty;
+}
+
+/* 这里**试过**给段落加「随滚动浮上来」的入场，然后撤掉了，理由记在这：
+   滚动驱动的入场必然把还没进入视口的元素留在起始状态，量出来是
+   折线以下那一段的 opacity 停在 0.38。对别的网站那叫入场动画，
+   对一个阅读应用那叫**把用户正要读的正文调暗**——而这一屏的全部意义
+   就是让人把字读进去。装饰性动画不该和产品的核心动作抢。
+
+   滚动时间线本身是好东西，只是该花在别处：见下面的阅读进度条。 */
 
 .s { cursor: pointer; border-radius: 3px; transition: background-color .12s var(--ease); }
 .s:hover { background: var(--accent-soft); }
@@ -89,6 +126,16 @@ article.doc h1 {
    压在 #1b1a22 的阅读面上几乎看不出来——「哪几个是要学的词」得逐行去找。
    现在直接给字上色：正文里唯一一处彩色文字，扫一眼就能定位。
    底色带留着但换成同色系并压淡，只作为「这是被标记过的」的次要信号。 */
+/* 荧光笔的横向长度。注册成带类型的自定义属性，浏览器才知道两个百分比
+   之间怎么插值——不注册的话它是一段字符串，`0% -> 100%` 只会在中途硬跳，
+   和之前那条 pop 关键帧从颜色动到渐变是同一种「写了动画但没有动画」。
+   有了它，那道荧光笔就能**自己从左画到右**，像真的用马克笔划过去。 */
+@property --hl-w {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+
 .tw { position: relative; cursor: pointer; border-radius: 3px; }
 /* inline-block 是为了让它能被 transform（揭示那一下要缩放）。
    目标词永远是单个词，内部本来也不折行，所以不会带来换行上的副作用。 */
@@ -106,7 +153,11 @@ article.doc h1 {
   background: linear-gradient(180deg,
     transparent 64%,
     color-mix(in srgb, var(--target-soft) 72%, transparent) 64%);
-  transition: background var(--dur-2) var(--ease), transform var(--dur-1) var(--ease-out);
+  /* 横向只铺 --hl-w 那么宽，剩下的留空——揭示时把它从 0% 动到 100%，
+     这道笔画就是「画出来」的而不是「出现」的。平时是 100%，看不出区别。 */
+  background-size: var(--hl-w) 100%;
+  background-repeat: no-repeat;
+  transition: background-color var(--dur-2) var(--ease), transform var(--dur-1) var(--ease-out);
 }
 .tw .tw-blank { display: none; }
 .tw:hover .tw-word { background: var(--target-soft); transform: translateY(-1px); }
@@ -128,7 +179,7 @@ article.doc h1 {
      换个颜色会让人以为「揭示」这个动作改变了什么 */
   color: var(--target); background: var(--target-soft);
   border-radius: 4px; padding: 0 3px; letter-spacing: -.04em;
-  box-shadow: inset 0 1px 2px rgba(72, 54, 32, .16);
+  box-shadow: var(--sunk);
   transition: transform var(--dur-1) var(--ease-out), filter var(--dur-1) var(--ease);
 }
 .doc.mode-cloze .tw:hover .tw-blank { filter: brightness(.96); transform: translateY(-1px); }
@@ -142,15 +193,29 @@ article.doc h1 {
    原来是一条 pop 关键帧，从 `background: 颜色` 动到 `background: 渐变`。
    这两者浏览器插值不了（`<color>` 和 `<image>` 之间没有中间态），
    实际表现是中途硬跳一下——写了动画，但没有动画。
-   现在动的是 transform 和 box-shadow 的扩散半径，都是能插值的量：
-   词从小一点弹到位，同时一圈暖色光晕向外扩散并淡出。 */
+   现在动的是 transform、box-shadow 的扩散半径、以及注册过的 --hl-w，
+   全是能插值的量。
+
+   两条动画叠着跑，分工不同：
+     · reveal-word  —— 词本身弹到位。用的是真弹簧（--spring-bounce，
+       阻尼谐振子采样出来的），不是贝塞尔近似的那条：真弹簧过冲之后
+       会回落再稳住，而贝塞尔只能过冲一次直接收尾。这一下的手感差别
+       全在那个回落上。
+     · reveal-stroke —— 荧光笔从左画到右，晚 90ms 起步。
+       先看见词、再看见它被划上记号，顺序对得上「答对了，标一下」。 */
 .doc.mode-cloze .tw.just-revealed .tw-word {
-  animation: reveal-word .52s var(--ease-spring) both;
+  animation:
+    reveal-word var(--dur-spring-bounce) var(--spring-bounce) both,
+    reveal-stroke .34s var(--ease-out) 90ms both;
 }
 @keyframes reveal-word {
   0%   { transform: scale(.86); box-shadow: 0 0 0 0 var(--target-soft); }
-  55%  { transform: scale(1.06); box-shadow: 0 0 0 8px var(--target-soft); }
-  100% { transform: scale(1);    box-shadow: 0 0 0 14px transparent; }
+  45%  { transform: scale(1);   box-shadow: 0 0 0 7px var(--target-soft); }
+  100% { transform: scale(1);   box-shadow: 0 0 0 13px transparent; }
+}
+@keyframes reveal-stroke {
+  from { --hl-w: 0%; }
+  to   { --hl-w: 100%; }
 }
 
 /* ------------------------------ 词条面板 ------------------------------ */
@@ -168,7 +233,10 @@ article.doc h1 {
   overflow-y: auto;
   overscroll-behavior: contain;   /* 面板滚到底不要带着正文一起滚 */
 }
-.panel.open { transform: none; transition-timing-function: var(--ease-spring); }
+.panel.open {
+  transform: none;
+  transition: transform var(--dur-spring-soft) var(--spring-soft);
+}
 
 /* 面板里的内容跟着晚一点点进来。整块一起滑进来是「一个板子」，
    内容稍稍落后是「板子上摆着东西」——差别就在这 60ms 上。 */
@@ -298,7 +366,7 @@ article.doc h1 {
   position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
   min-width: 232px; padding: var(--sp-4);
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  border-radius: var(--radius); box-shadow: var(--shadow-3);
   display: flex; flex-direction: column; gap: var(--sp-3);
 }
 .typo-pop[hidden] { display: none; }
@@ -335,7 +403,7 @@ article.doc h1 {
   padding: 10px 12px;
   background: var(--surface); color: var(--text);
   border: 1px solid var(--line); border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-4);
   font-family: var(--sans); font-size: 13.5px; line-height: 1.55;
   /* 不接受指针事件：否则浮层压到词上面时会立刻触发词的 mouseleave，
      浮层跟着消失，再触发 mouseenter……一秒钟闪十几次。 */
