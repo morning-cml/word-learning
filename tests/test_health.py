@@ -69,11 +69,11 @@ def test_L4_用的是真正在跑的那段_prompt():
     src = inspect.getsource(health._calibrate)
     assert "from tasks.article.prompts import audit_prompt" in src
     assert "coerce_audits" in src
-    assert "claim_audits" in src, "认领必须复用管线那一份，不能在这里另立判据"
+    assert "claim_by_lemma" in src, "认领必须复用管线那一份，不能在这里另立判据"
 
 
 def test_模型回屈折形时_L4_不报漏审():
-    """问它 tedious、它回 tediously，真管线认得出（`claim_audits`），
+    """问它 tedious、它回 tediously，真管线认得出（`claim_by_lemma`），
     L4 原来认不出——于是对着一个**管线明明处理得了**的返回值报
     「漏审了 tedious、meticulous」，把整次检验判成没过，
     还附一句「每段多烧一次补线索调用」，而那句话是错的。

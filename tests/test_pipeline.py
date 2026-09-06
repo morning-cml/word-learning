@@ -164,15 +164,22 @@ def test_保留段落的其它键():
 
 
 def test_认领模型回声用的是全项目同一个判据():
-    """`_normalize` 和 `claim_audits` 都拿 same_word 认领模型的回声，
-    选题这一步原来只比字面——同一个语义判断两处两套判据，迟早分叉
-    （需要注意.md 第 2d、20 条）。这条钉的是「三处用的是同一个」。"""
+    """「模型回的这个词是不是我问的那个词」在这个项目里只该有一份判据。
+
+    管线里有五处要做这个判断：选题的词分配、targets 收敛、线索审计、释义，
+    以及四层检验 L4。原先只有 `_normalize` 用 `same_word`，其余四处都停在
+    字符串相等——同一个语义判断散成两套，迟早分叉（需要注意.md 第 2d、20 条）。
+    这条钉的是「都走同一份」：要么直接用 `same_word`，要么走
+    `claim_by_lemma`（它自己用 `same_word`）。
+    """
     import inspect
 
     from core.lexicon.lemma import same_word
 
-    for fn in (ArticleTask._assign_words, ArticleTask._normalize, ArticleTask.claim_audits):
+    for fn in (ArticleTask._assign_words, ArticleTask._normalize, ArticleTask.claim_by_lemma):
         assert "same_word" in inspect.getsource(fn), fn.__name__
+    for fn in (ArticleTask.audit_clues, ArticleTask._glossary):
+        assert "claim_by_lemma" in inspect.getsource(fn), fn.__name__
     # 判据本身是有方向的：认得出屈折形，但不能把异干替补也算进来
     assert same_word("abandon", "abandoned") and same_word("studies", "study")
     assert not same_word("better", "good")
@@ -266,6 +273,46 @@ def test_完全对不上的结论仍按最坏情况处理(fake_llm, happy_respon
     happy_responses["audit"] = {"audits": [{"lemma": "unrelated", "strength": "strong"}]}
     _, stats, _ = run_pipeline(fake_llm(happy_responses))
     assert stats["clue_strength"]["none"] == 2
+
+
+# ----------------------------------------------------------------- 释义
+
+def test_释义回了屈折形也挂得上词条(fake_llm, happy_responses):
+    """问它 abandon、它回 abandoned，这一条释义原来就永远挂不上词条。
+
+    下游 save_article 是拿目标词的 lemma（已被 _normalize 归回用户拼写）
+    去这份表里查的，键上留着模型回声就对不上。表现是词条面板和悬停浮层
+    一直显示「还没有释义」，而管线里没有任何地方会说这事发生过——
+    释义是加分项，所以它比另外两处更不容易被发现，根因却是同一个。
+    """
+    happy_responses["glossary"] = {"glossary": [
+        {"lemma": "abandoned", "pos": "v.", "zh": "抛弃", "note": ""},
+        {"lemma": "Silences", "pos": "n.", "zh": "寂静", "note": "常用不可数"},
+    ]}
+    doc, _, _ = run_pipeline(fake_llm(happy_responses))
+    assert doc["glossary"] == {"abandon": "v. 抛弃", "silence": "n. 寂静 （常用不可数）"}
+
+
+def test_没写释义的条目不占掉名额(fake_llm, happy_responses):
+    """认领是一对一的：先滤掉 zh 为空的条目，否则一个空条目认走了 abandon，
+    真正有释义的那条（回声是 abandoned）反而认不上，等于修了个寂寞。"""
+    happy_responses["glossary"] = {"glossary": [
+        {"lemma": "abandon", "pos": "", "zh": "", "note": ""},
+        {"lemma": "abandoned", "pos": "v.", "zh": "抛弃", "note": ""},
+    ]}
+    doc, _, _ = run_pipeline(fake_llm(happy_responses))
+    assert doc["glossary"] == {"abandon": "v. 抛弃"}
+
+
+def test_释义里不属于这批词的条目丢掉(fake_llm, happy_responses):
+    """模型顺手多写几个词的释义是常事。留着无害但也无用——
+    save_article 只按目标词查，键上多出来的东西一辈子不会被读到。"""
+    happy_responses["glossary"] = {"glossary": [
+        {"lemma": "abandon", "pos": "v.", "zh": "抛弃", "note": ""},
+        {"lemma": "quixotic", "pos": "adj.", "zh": "不切实际的", "note": ""},
+    ]}
+    doc, _, _ = run_pipeline(fake_llm(happy_responses))
+    assert doc["glossary"] == {"abandon": "v. 抛弃"}
 
 
 # ------------------------------------------------------- targets 的收敛

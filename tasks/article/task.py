@@ -155,7 +155,7 @@ class ArticleTask(Task):
                         slots[p_i][w_i] = canonical[key]
 
         # 先字面、再屈折形：否则一个屈折形可能抢走另一个词正好要用的那条，
-        # 和 claim_audits 里那两遍是同一个道理。
+        # 和 claim_by_lemma 里那两遍是同一个道理。
         claim(lambda key, raw: key == raw.lower())
         claim(lambda key, raw: same_word(canonical[key], raw))
         cleaned = [{**p, "words": [w for w in row if w]}
@@ -234,13 +234,17 @@ class ArticleTask(Task):
             )
         return problems
 
-    # -------------------------------------------------------------- 语境线索审计
+    # ------------------------------------------------- 认领模型回声（全项目共用）
 
     @staticmethod
-    def claim_audits(expected: list[str], audits: list[dict]) -> list[dict | None]:
-        """把模型回的每条结论认领到某个目标词上。认不上的位置留 None。
+    def claim_by_lemma(expected: list[str], items: list[dict]) -> list[dict | None]:
+        """把一批带 `lemma` 的模型回声一一认领到目标词上，认不上的位置留 None。
 
-        原来是拿 lemma 做字符串相等。模型经常回一个屈折形——问它
+        管线里有三处要做这件事，形状完全一样：线索审计的结论、释义、
+        以及四层检验 L4 的定标结果——都是「模型回了一批 {lemma: ...}，
+        对回我问的那批词」。所以判据只写这一遍（需要注意.md 第 20 条）。
+
+        原来各处都是拿 lemma 做字符串相等。模型经常回一个屈折形——问它
         meticulous，它回 meticulously——于是这个词被当成「漏审」，
         按最坏情况兜底成 none，接着发生的事一件比一件糟：
           · 一段本来线索充分的段落挨两轮补线索改写（4 次多余调用，两分多钟），
@@ -248,35 +252,35 @@ class ArticleTask(Task):
           · 结果面板把它报成「语境线索充分 0/1」——正好反了。
         而线索强度是这个项目唯一用来自我监测的仪表（见 SENTENCE_SCAFFOLD
         上面那段），仪表本身读反了，「错了会响」这条前提就不成立了。
+        另外两处的代价：释义挂不上词条（词条面板一直显示「还没有释义」）、
+        L4 对着一个管线明明认得出的返回值报「漏审」并把整次检验判成没过。
 
         same_word 是这个项目对「这是不是同一个词」的既定判据，_appears 和
         cefr.scan 用的都是它。这里没有理由另立一套（见 需要注意.md 第 6 条）。
         两遍：先让字面相同的认领完，再让屈折形去认剩下的——否则一个屈折形
         可能抢走另一个词正好要用的那条。认领过的从池子里拿走，
-        一条结论只能算到一个词头上，不然 clue_strength 的分母会虚高。
+        一条回声只能算到一个词头上，不然 clue_strength 的分母会虚高。
 
-        **单独成一个函数是因为它有第二个调用方**：`core/health.py` 的 L4
-        校准。那一层原来自己拿 `{lemma: strength}` 做字典查，也就是回到了
-        字符串相等——于是模型回一个屈折形时，L4 报「漏审了 tedious、
-        meticulous」并把整次检验判成没过，而同样的返回值在真管线里是认得出的。
-        L4 存在的全部意义是「测真正会跑的那段」（见 _calibrate 的注释），
-        判据分叉了就测的是别的东西（需要注意.md 第 2d、20 条）。
+        调用方要自己先滤掉没用的条目（比如释义里 zh 为空的那些）：
+        认领是一对一的，一个空条目认上了就把那个词的名额占掉了。
         """
         picked: list[dict | None] = [None] * len(expected)
-        pool = list(audits)
+        pool = list(items)
 
         def claim(match) -> None:
             for i, word in enumerate(expected):
                 if picked[i] is not None:
                     continue
-                for j, audit in enumerate(pool):
-                    if match(word, audit["lemma"]):
+                for j, item in enumerate(pool):
+                    if match(word, item["lemma"]):
                         picked[i] = pool.pop(j)
                         break
 
         claim(lambda word, lemma: word.lower() == lemma.lower())
         claim(same_word)
         return picked
+
+    # -------------------------------------------------------------- 语境线索审计
 
     @staticmethod
     def audit_clues(llm: LLM, para: dict, expected: list[str]) -> list[dict]:
@@ -294,7 +298,7 @@ class ArticleTask(Task):
             prompts.audit_prompt(text, expected),
             purpose="structured", max_tokens=2500, json_schema=AUDIT_SCHEMA,
         ))
-        picked = ArticleTask.claim_audits(expected, audits)
+        picked = ArticleTask.claim_by_lemma(expected, audits)
 
         # lemma 一律改回用户给的那个词：下游 save_article 是按目标词的 lemma
         # 去 audits 里找线索的，留着模型的回声会挂不上，这一处语境就没有线索了。
@@ -507,7 +511,21 @@ class ArticleTask(Task):
 
     @staticmethod
     def _glossary(llm: LLM, words: list[str], context: str) -> dict[str, str]:
-        """一次调用拿全部目标词的中文释义。失败不影响文章本身。"""
+        """一次调用拿全部目标词的中文释义。失败不影响文章本身。
+
+        返回的 key 一律是**用户给的那个词**，不是模型回声：下游
+        `save_article` 是拿目标词的 lemma 去这份表里查的（而那个 lemma 已经被
+        `_normalize` 归回用户的拼写），键上留着模型的回声就挂不上。
+
+        原来是直接 `out[模型给的 lemma] = ...`，又一次拿字符串相等去认领模型
+        回声。问它 abandon、它回 abandoned，这个词的释义就永远挂不上词条——
+        词条面板和悬停浮层一直显示「还没有释义」，而管线里没有任何地方会说
+        这事发生过。释义只是加分项，所以它比另外两处更不容易被发现，
+        但根因是同一个（需要注意.md 第 2d 条）。
+
+        先滤掉 zh 为空的条目再认领：`claim_by_lemma` 是一对一的，
+        一个空条目认上了就把那个词的名额占掉，真正有释义的那条反而认不上了。
+        """
         if not words:
             return {}
         try:
@@ -517,11 +535,12 @@ class ArticleTask(Task):
             )
         except Exception:  # noqa: BLE001  释义只是加分项，挂了也不该毁掉整篇文章
             return {}
+        usable = [g for g in coerce_glossary(data) if g["lemma"] and g["zh"]]
         out: dict[str, str] = {}
-        for item in coerce_glossary(data):
-            if not item["lemma"] or not item["zh"]:
+        for word, item in zip(words, ArticleTask.claim_by_lemma(words, usable)):
+            if item is None:
                 continue
-            out[item["lemma"]] = " ".join(filter(None, [
+            out[word.lower()] = " ".join(filter(None, [
                 f"{item['pos']} {item['zh']}".strip(),
                 f"（{item['note']}）" if item["note"] else "",
             ]))

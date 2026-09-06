@@ -217,7 +217,7 @@ def _calibrate(llm: LLM) -> dict[str, str]:
     认领这一步曾经是自己做的（`{a["lemma"]: ...}` 再拿定标词去查字典），
     也就是回到了字符串相等。而模型回屈折形是这条链上最常见的一种偏差——
     问它 meticulous，它回 meticulously——真管线为此专门用 same_word 认领
-    （见 ArticleTask.claim_audits）。两边判据一分叉，L4 就会对着一个
+    （见 ArticleTask.claim_by_lemma）。两边判据一分叉，L4 就会对着一个
     **管线明明处理得了**的返回值报「漏审了 tedious、meticulous」，
     把整次检验判成没过，还附一句「每段多烧一次补线索调用」——那句话是错的。
     检验比被检验的代码更不能有自己的假设（需要注意.md 第 2d、20 条）。
@@ -230,7 +230,7 @@ def _calibrate(llm: LLM) -> dict[str, str]:
         audit_prompt(CALIBRATION_TEXT, CALIBRATION_WORDS),
         purpose="structured", max_tokens=2500, json_schema=AUDIT_SCHEMA,
     ))
-    picked = ArticleTask.claim_audits(CALIBRATION_WORDS, audits)
+    picked = ArticleTask.claim_by_lemma(CALIBRATION_WORDS, audits)
     # 认不上的留空而不是兜底成 none：这里要分得出「模型说没线索」和
     # 「模型压根没答」，下面 L4 对这两件事报的是不同的问题。
     return {word: got["strength"] for word, got in zip(CALIBRATION_WORDS, picked) if got}

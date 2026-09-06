@@ -367,7 +367,7 @@ config/
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest                          # Python 442 项
+pytest                          # Python 445 项
 
 cd tests/frontend
 npm install
