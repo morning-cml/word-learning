@@ -41,6 +41,29 @@ def temp_db(tmp_path, monkeypatch):
     return db
 
 
+@pytest.fixture
+def client(temp_db, tmp_path, monkeypatch):
+    """接口层的测试客户端。
+
+    除了把库换成临时的（temp_db），**设置文件也必须换掉**。上面那条
+    「不碰用户的库」同样适用于 config/settings.local.json：它装着 API Key，
+    而 POST /api/settings 是会真写进去的——一条测试跑完，用户存的用词上限
+    就被改成了测试用的那个值，而且没有任何地方会说一声。
+    这个文件和 data/app.db 是本机仅有的两份不可再生状态，两份都得隔离。
+    """
+    from fastapi.testclient import TestClient
+
+    from core import settings
+
+    monkeypatch.setattr(settings, "SETTINGS_PATH", tmp_path / "settings.local.json")
+    import main
+
+    # base_url 必须是回环名字：应用只认 127.0.0.1 / localhost（防 DNS rebinding），
+    # TestClient 默认发的 Host 是 testserver，会被中间件挡成 400。
+    # 把 testserver 加进白名单更省事，但那等于为了测试在生产配置里开个口子。
+    return TestClient(main.app, base_url="http://127.0.0.1")
+
+
 class FakeLLM:
     """按 prompt 内容分发的假模型。
 

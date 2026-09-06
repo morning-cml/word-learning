@@ -78,7 +78,7 @@ python.exe），以及报错有地方显示。改用 `pythonw` / `start` 隐藏�
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest                                  # Python，445 项
+pytest                                  # Python，456 项
 
 cd tests/frontend
 npm install && python make_fixtures.py && npm test    # 前端，135 项
@@ -89,6 +89,25 @@ npm install && python make_fixtures.py && npm test    # 前端，135 项
 而那恰恰是这个项目最需要覆盖的部分。
 
 写新测试时，优先覆盖「错了也不会报错、只会安静给出错结果」的那一类。
+
+## 版本号
+
+**只有一处：`core/version.py` 的 `VERSION`。** 顶栏、`/api/status`、CHANGELOG
+的标题都从它派生，模板里不许写死。
+
+改完东西要发一版时，两件事一起做：
+
+1. 改 `core/version.py`；
+2. 把 CHANGELOG 里的 `## [未发布]` 改成 `## [x.y.z] - YYYY-MM-DD`，
+   再在上面新开一个空的「未发布」。
+
+怎么分档：**主版本**只在 `data/app.db` 结构不兼容、或旧库需要人工介入时进——
+库是这个项目唯一不可再生的资产，动了它必须让用户看得出来；**次版本**是加功能
+或界面/管线有可感知的变化；**修订**是修 bug、改文档、调样式。
+
+只做第一件事的话，用户会看到一个查不到任何说明的新号；只做第二件，
+顶栏永远停在旧号上。`tests/test_version.py` 把这两种情况都变成测试失败——
+它是这条规矩唯一的执行者，别绕过它（比如在模板里写死一个号）。
 
 ## 风格
 

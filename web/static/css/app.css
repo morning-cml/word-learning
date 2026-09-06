@@ -105,6 +105,13 @@ code {
 .model-chip:hover { border-color: var(--faint); color: var(--muted); }
 .model-chip.warn { color: var(--warn); border-color: var(--warn); }
 
+/* 版本号。它是「需要的时候才去找」的信息（报问题、对更新），
+   平时不该跟模型状态抢注意力——所以比 chip 更淡、不加框、不可点。 */
+.version {
+  font-family: var(--mono); font-size: 11px; color: var(--faint);
+  letter-spacing: .02em; white-space: nowrap; user-select: all;
+}
+
 .icon-btn {
   width: 32px; height: 32px; display: grid; place-items: center;
   background: transparent; border: 1px solid var(--line); border-radius: var(--radius-sm);

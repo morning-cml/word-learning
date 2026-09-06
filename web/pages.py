@@ -21,6 +21,8 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from core.version import VERSION
+
 
 @dataclass(frozen=True)
 class Page:
@@ -80,6 +82,10 @@ def _view(page: Page, templates: Jinja2Templates):
                 # 导航所需的两项在这里注入，模板里就不用各自去 import 注册表
                 "nav_pages": nav_pages(),
                 "active": active_id(request.url.path),
+                # 服务端渲染而不是让前端去 /api/status 拿：版本号在一次运行里
+                # 是常量，走接口只会让顶栏先空一下再跳出个数字。
+                # 值来自 core/version.py 那一处，模板里不许写死。
+                "version": VERSION,
             },
         )
     return view

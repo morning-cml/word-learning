@@ -28,6 +28,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from core import settings
 from core.lexicon import cefr
 from core.store import db
+from core.version import VERSION
 from web import pages
 from web.routes.article_api import router as article_router
 from web.routes.settings_api import router as settings_router
@@ -69,6 +70,10 @@ def status() -> dict:
     """顶栏和设置页都用它。加字段时记得前端 api.js 那边不用改——它只透传。"""
     provider, model = settings.active()
     return {
+        # 顶栏那个号是服务端直接渲进 HTML 的（见 web/pages.py），这里再给一份
+        # 是为了让「当前跑的是哪一版」在**程序上**也拿得到：报问题、比对行为、
+        # 以后做自动更新检查都要它，而截图里的那个号取不出来。
+        "version": VERSION,
         "provider": provider,
         "model": model,
         "has_key": bool(settings.api_key(provider)),

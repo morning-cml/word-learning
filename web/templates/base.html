@@ -42,6 +42,10 @@
   </nav>
 
   <div class="topbar-end">
+    {# 版本号。值来自 core/version.py 那一处，这里不许写死——
+       写死了就会出现「界面说 0.2.0、CHANGELOG 写着 0.3.0」，
+       而用户报 bug 时给的那个号对不上任何一次实际发布。 #}
+    <span class="version" title="Word Learning v{{ version }}">v{{ version }}</span>
     <span class="model-chip" id="modelChip" role="button" tabindex="0">…</span>
     <button class="icon-btn" id="themeBtn" type="button" title="切换深浅色">☾</button>
   </div>
