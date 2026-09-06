@@ -31,7 +31,9 @@ function row(a) {
   const words = (a.target_words || []);
   const chips = words.slice(0, 6).map((w) => `<span class="chip">${escapeHtml(w)}</span>`).join('')
     + (words.length > 6 ? `<span class="chip">+${words.length - 6}</span>` : '');
-  return `<tr data-id="${a.id}">
+  // data-level 只带数据，颜色留给 CSS（.table tbody tr[data-level]）：
+  // 写成 inline style 的话色值就搬进 JS 了，换主题时管不到它。
+  return `<tr data-id="${a.id}" data-level="${escapeHtml(a.level || '')}">
     <td>
       <a href="/read/${a.id}">${escapeHtml(a.title_en || '（无标题）')}</a>
       <div class="hint">${escapeHtml(a.title_zh || '')}${a.genre ? ' · ' + escapeHtml(a.genre) : ''}</div>

@@ -23,7 +23,16 @@
         <tbody></tbody>
       </table>
     </div>
-    <div class="empty" id="empty" hidden>还没有文章。去<a href="/">生成</a>第一篇。</div>
+    {# 空文库是新用户打开这个应用看到的第一屏，它决定人知不知道下一步该干什么。
+       原先是一行灰字。app.css 里 .empty-state 那一整套（图标 / 标题 / 说明 /
+       按钮）早就写好了，只是从来没有人用过——写了样式没接上。 #}
+    <div class="empty-state" id="empty" hidden>
+      {% include "_mark.html" %}
+      <h3>文库还是空的</h3>
+      <p>把一批要学的词写成一篇有情节的短文，读一遍就把它们记住。
+         同一批词过几天换个题材再生成一篇，效果比重复背更好。</p>
+      <a class="btn btn-primary" href="/">生成第一篇</a>
+    </div>
   </div>
 </main>
 {% endblock %}

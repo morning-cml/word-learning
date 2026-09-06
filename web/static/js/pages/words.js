@@ -64,12 +64,12 @@ function render() {
   const rows = all.filter(matches);
   $('#table').hidden = rows.length === 0;
   $('#empty').hidden = rows.length > 0;
-  $('#empty').textContent = all.length
-    ? '没有符合条件的词。'
-    : '还没有词条。去生成第一篇文章。';
+  // 只切状态，不动内容：原来这里是 textContent 覆盖，把模板里那句话
+  // 连同「去生成第一篇」的链接一起冲掉了——空态反而没了出路。
+  $('#empty').dataset.state = all.length ? 'filtered' : 'none';
 
   html($('#table tbody'), rows.map((w) => `
-    <tr class="word-row" data-lemma="${escapeHtml(w.lemma)}">
+    <tr class="word-row" data-lemma="${escapeHtml(w.lemma)}" data-level="${escapeHtml(w.cefr || '')}">
       <td class="word-cell"><div class="lemma">${escapeHtml(w.lemma)}</div></td>
       <td class="gloss-cell">${w.gloss ? escapeHtml(w.gloss) : '<span class="hint">还没有释义</span>'}</td>
       <td class="tight">${level(w.cefr)}</td>

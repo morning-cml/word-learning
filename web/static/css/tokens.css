@@ -102,6 +102,11 @@
      输入框、分段控件的轨道、挖空的槽都归它，方向一致才像同一个光源。 */
   --sunk: inset 0 1px 3px rgba(72, 54, 32, .12);
 
+  /* 纸上的横格与装订线。极淡——它是「这是一张纸」的暗示，不是要被读的内容。
+     浅色下比 --line-soft 还淡一档，深色下反过来要略提亮才透得出来。 */
+  --rule: rgba(150, 128, 96, .16);
+  --stitch: rgba(150, 128, 96, .3);
+
   --shadow:   var(--shadow-1);
   --shadow-lg:var(--shadow-3);
   --shadow-hover: var(--shadow-2);
@@ -231,6 +236,8 @@
                 0 18px 40px rgba(0, 0, 0, .42),
                 0 40px 80px rgba(0, 0, 0, .4);
     --sunk: inset 0 1px 3px rgba(0, 0, 0, .34);
+    --rule: rgba(214, 186, 150, .1);
+    --stitch: rgba(214, 186, 150, .18);
     --shadow-4: 0 4px 10px rgba(0, 0, 0, .34),
         0 18px 40px rgba(0, 0, 0, .42),
         0 40px 80px rgba(0, 0, 0, .4);
@@ -299,6 +306,8 @@
         0 18px 40px rgba(0, 0, 0, .42),
         0 40px 80px rgba(0, 0, 0, .4);
   --sunk: inset 0 1px 3px rgba(0, 0, 0, .34);
+  --rule: rgba(214, 186, 150, .1);
+  --stitch: rgba(214, 186, 150, .18);
   --edge: inset 0 1px 0 rgba(255, 238, 214, .07);
   --grain-blend: overlay;
   --grain-strength: .05;

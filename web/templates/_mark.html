@@ -1,0 +1,21 @@
+{# 产品标识。**只定义在这里**，顶栏和各处空态都 include 它。
+
+   图形就是这个产品的一句话：一页文字，其中一行被荧光笔划过。
+   荧光笔那道用两条重叠的线画（粗的浅色在下、细的深色在上），
+   和正文里目标词的处理是同一件事。
+
+   内联 SVG 而不是图片：能用 currentColor 和 var(--target)，
+   所以它跟着深浅主题走，不用准备两张图；尺寸由 CSS 的 .mark 给。
+
+   要改图形就改这一个文件。抄第二份出去，迟早两处长得不一样
+   （需要注意.md 第 20 条）。favicon 是唯一的例外，理由写在 base.html 那行。 #}
+<svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+  <rect x="4.25" y="3.25" width="15.5" height="17.5" rx="2.6"
+        stroke="currentColor" stroke-width="1.5" opacity=".8"/>
+  <path d="M7.6 8h8.8M7.6 15h8.8M7.6 18h5.4" stroke="currentColor"
+        stroke-width="1.5" stroke-linecap="round" opacity=".32"/>
+  <path d="M7.6 11.5h7" stroke="var(--target)" stroke-width="3.6"
+        stroke-linecap="round" opacity=".5"/>
+  <path d="M7.6 11.5h7" stroke="currentColor" stroke-width="1.5"
+        stroke-linecap="round"/>
+</svg>

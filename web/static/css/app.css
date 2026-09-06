@@ -122,7 +122,13 @@ code {
   color: var(--text); letter-spacing: -.01em; white-space: nowrap;
 }
 .brand:hover { text-decoration: none; }
-.brand .mark { font-size: 18px; line-height: 1; }
+.brand .mark {
+  width: 21px; height: 21px; flex: none; display: block;
+  color: var(--text);
+  /* 悬停时那道荧光笔亮一档。整个标识就一处彩色，动它一下最省、也最点题 */
+  transition: transform var(--dur-2) var(--spring-snap);
+}
+.brand:hover .mark { transform: rotate(-3deg) scale(1.06); }
 
 .topnav { display: flex; gap: var(--sp-1); flex: 1; min-width: 0; overflow-x: auto; }
 .topnav::-webkit-scrollbar { display: none; }
@@ -163,6 +169,12 @@ code {
   transition: background .15s var(--ease), border-color .15s var(--ease);
 }
 .icon-btn:hover { background: var(--surface-2); border-color: var(--faint); color: var(--text); }
+/* 切主题时图标转半圈。这个按钮一天按不了几次，但按下去的那一下是整个界面
+   唯一「整屏都变了」的时刻——图标硬替换会让人怀疑是不是没点中。
+   :active 上做，不用等 JS 改完文字：反馈要在按下的那一瞬间。 */
+.icon-btn#themeBtn { transition: transform var(--dur-spring-snap) var(--spring-snap),
+                                 background .15s var(--ease), border-color .15s var(--ease); }
+.icon-btn#themeBtn:active { transform: rotate(180deg) scale(.92); }
 
 /* ============================== 页面骨架 ============================== */
 
@@ -423,6 +435,22 @@ button.chip { cursor: pointer; }
   background: var(--surface-2);
   box-shadow: inset 3px 0 0 var(--accent);
 }
+
+/* 书脊。每行左缘一条按 CEFR 等级着色的窄边——一列扫下来就是一排书的书脊，
+   难度构成不用逐行读字母就看得见。色值本来就有（--lv-*），
+   以前只画在那个小徽章上，等于同一份数据只用了一次。
+   等级由 JS 打在 data-level 上，色值仍旧留在 CSS 里：
+   inline style 会把颜色搬进 JS，那样换主题就管不到它了。 */
+.table tbody tr[data-level] { box-shadow: inset 3px 0 0 var(--row-lv, var(--line)); }
+.table tbody tr[data-level="A1"] { --row-lv: var(--lv-a1); }
+.table tbody tr[data-level="A2"] { --row-lv: var(--lv-a2); }
+.table tbody tr[data-level="B1"] { --row-lv: var(--lv-b1); }
+.table tbody tr[data-level="B2"] { --row-lv: var(--lv-b2); }
+.table tbody tr[data-level="C1"] { --row-lv: var(--lv-c1); }
+.table tbody tr[data-level="C2"] { --row-lv: var(--lv-c2); }
+/* 悬停时书脊加宽，颜色仍是它自己的等级色——不换成品牌色，
+   否则「这一行是什么难度」在最需要看的那一刻反而没了 */
+.table tbody tr[data-level]:hover { box-shadow: inset 5px 0 0 var(--row-lv, var(--accent)); }
 /* 行内的操作按钮平时收起来。原先每行最亮的元素是那个红色「删除」，
    而删除恰恰是这张表最不该被先看到的东西。 */
 .table tbody tr .row-act { opacity: 0; transition: opacity .12s var(--ease); }
@@ -527,8 +555,12 @@ button.chip { cursor: pointer; }
   margin-top: 7px; font-size: 12.5px; color: var(--muted);
 }
 .progress-legend .spacer { flex: 1; }
-/* 不用等宽：这行基本是中文，落到等宽字体栈里会被拉得字距很开 */
-#progressEta { font-size: 12px; color: var(--faint); white-space: nowrap; }
+/* 不换等宽字体（这行基本是中文，落到等宽栈里字距会被拉得很开），
+   但**数字要等宽**：它每秒重画一次，比例数字会让「1 分 30 秒」和
+   「1 分 45 秒」宽度不同，整行跟着来回跳。tabular-nums 只改数字的字宽，
+   中文不受影响——正好是这里要的。 */
+#progressEta { font-size: 12px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#progressMeta { font-variant-numeric: tabular-nums; }
 
 /* ============================== 进度时间线 ==============================
    生成一篇要跑 4-9 次模型调用、一两分钟。转圈圈的体验很差，所以把管线的
@@ -705,10 +737,20 @@ button.chip { cursor: pointer; }
    那一屏决定用户知不知道下一步该干什么。 */
 
 .empty-state { padding: var(--sp-7) var(--sp-5); text-align: center; }
-.empty-state .mark { font-size: 30px; line-height: 1; opacity: .5; }
-.empty-state h3 { margin: var(--sp-3) 0 var(--sp-1); font-size: 16px; }
-.empty-state p { color: var(--muted); font-size: 13.5px; margin: 0 auto; max-width: 46ch; }
-.empty-state .btn { margin-top: var(--sp-4); display: inline-block; }
+.empty-state[hidden] { display: none; }
+/* 标识在这里放大当插图用。压淡一档：空态是「还没开始」，
+   不该比旁边那个「开始」按钮还响。 */
+.empty-state .mark {
+  width: 44px; height: 44px; margin: 0 auto; display: block;
+  color: var(--muted); opacity: .75;
+}
+.empty-state h3 { margin: var(--sp-4) 0 var(--sp-1); font-size: 16px; }
+.empty-state p { color: var(--muted); font-size: 13.5px; margin: 0 auto; max-width: 46ch; line-height: 1.75; }
+.empty-state .btn { margin-top: var(--sp-5); display: inline-block; }
+/* 两种空只显示对应的那一种（见 words.html） */
+.empty-state[data-state="none"] .empty-filtered,
+.empty-state[data-state="filtered"] .empty-none { display: none; }
+.empty-state .empty-filtered { color: var(--faint); font-size: 14px; }
 
 /* ============================== 逐词线索结论 ==============================
    管线里最贵的那次调用（线索审计）产出的是逐词结论，原先只被压成一句

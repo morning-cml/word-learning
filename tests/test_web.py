@@ -481,3 +481,49 @@ def test_预览的篇幅跟着词数走(client):
 
     assert est(1) < est(3) < est(6) < est(12), "篇幅必须随词数增长"
     assert est(1) != est(6), "一个词和六个词不能给出同样的篇幅"
+
+
+# ------------------------------------------------------------ 标识与空态
+
+MARK_TPL = "_mark.html"
+
+
+@pytest.mark.parametrize("path,_page_id", PAGES)
+def test_每个页面的顶栏都有标识(client, path, _page_id):
+    """标识是 base.html 通过 include 注入的，所有页面共用——
+    但「共用」靠的是那一行 include，漏了哪一页只有那一页没有。"""
+    assert 'class="mark"' in client.get(path).text
+
+
+def test_标识只定义在一个文件里():
+    """图形抄第二份出去，迟早两处长得不一样（需要注意.md 第 20 条）。
+    这条盯的是「以后有人图省事直接粘一份 SVG 进模板」。"""
+    from pathlib import Path                                # noqa: PLC0415
+
+    tpl_dir = Path(__file__).resolve().parents[1] / "web" / "templates"
+    holders = [p.name for p in tpl_dir.glob("*.html")
+               if '<svg class="mark"' in p.read_text(encoding="utf-8")]
+    assert holders == [MARK_TPL], f"标识不该出现在 {set(holders) - {MARK_TPL}} 里"
+
+
+@pytest.mark.parametrize("path", ["/library", "/words"])
+def test_空态是有出路的(client, path):
+    """`.empty-state` 那一整套（图标 / 标题 / 说明 / 按钮）在 app.css 里写好了，
+    却**从来没有人用过**——两个页面的空态一直是一行灰字。
+    而空文库正是新用户打开这个应用看到的第一屏，它决定人知不知道下一步干什么。
+
+    「样式写好了但没接上」不会有任何人报：页面不报错、测试也全绿，
+    只是那一屏一直很差。所以只能在这里钉住。
+    """
+    body = client.get(path).text
+    assert 'class="empty-state"' in body, "空态没用上那套样式"
+    assert 'class="mark"' in body
+    #  必须给一条出路，而且指向真正能干活的那一页
+    assert 'href="/"' in body
+
+
+def test_词库的两种空态是分开的(client):
+    """筛没了和一个词都没有，该说的话不一样。原来是一句 textContent 盖掉整个
+    节点——那样连模板里「去生成第一篇」的链接也一起冲掉了，空态反而没了出路。"""
+    body = client.get("/words").text
+    assert 'class="empty-none"' in body and 'class="empty-filtered"' in body

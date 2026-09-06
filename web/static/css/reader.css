@@ -68,6 +68,7 @@
    max-width 是「栏宽 + 两边留白」：这样 --reader-measure 仍旧精确等于
    读者调的那个正文栏宽（一行 66 字符最好读），排版控件的语义不变。 */
 article.doc {
+  position: relative;      /* 装订线是它的 ::before */
   font-family: var(--serif);
   /* 字号和栏宽由读者自己定（见 .typo 控件），存在 localStorage。
      写成 var(--x, 默认值)：用户没设过就用默认值，设过了就一路生效——
@@ -88,12 +89,38 @@ article.doc h1 {
   font-family: var(--serif); font-size: 30px; line-height: 1.25;
   margin: var(--sp-4) 0 var(--sp-1); letter-spacing: -.015em;
 }
+/* 装订线。左边一道虚线，读起来是「这一页是被装订起来的」——
+   母题从「一张纸」推进到「一本书里的一页」。
+   用虚线（缝线）而不是实线：实线是笔记本的红边距线，太常见了；
+   缝线更具体，也更像这个应用在做的事——把一批词缝进一个故事里。 */
+article.doc::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--sheet-pad) * .46);
+  top: var(--sp-6); bottom: var(--sp-6);
+  width: 1px;
+  background: repeating-linear-gradient(to bottom,
+    var(--stitch) 0 7px, transparent 7px 15px);
+}
+
 .doc-sub { font-family: var(--sans); font-size: 14px; color: var(--muted); margin-bottom: var(--sp-6); }
+
 .para {
   margin: 0 0 1.4em;
   /* 按整段排版断行，不留孤字尾行。浏览器会回溯前几行来让最后一行不至于
      只剩一个词——正文一共就几段，这点代价换来的是每一段都收得干净。 */
   text-wrap: pretty;
+
+  /* 横格线。巧思在周期取 **1.9em**——那正好是 article.doc 的 line-height，
+     而 em 相对的是 .para 自己的字号，也就是 --reader-size。
+     于是读者在排版控件里把字号从 16 调到 23，格线**自己跟着变宽**，
+     永远压在每一行的下缘，不用 JS 也不用为每一档写一条媒体查询。
+
+     写成 1.9em 而不是把 19px×1.9 算成 36.1px 就是为了这个：
+     写死像素的话，调一次字号格线就和文字错开，而那种错位很难看。 */
+  background-image: repeating-linear-gradient(to bottom,
+    transparent 0, transparent calc(1.9em - 1px),
+    var(--rule) calc(1.9em - 1px), var(--rule) 1.9em);
 }
 
 /* 这里**试过**给段落加「随滚动浮上来」的入场，然后撤掉了，理由记在这：
@@ -103,6 +130,29 @@ article.doc h1 {
    就是让人把字读进去。装饰性动画不该和产品的核心动作抢。
 
    滚动时间线本身是好东西，只是该花在别处：见下面的阅读进度条。 */
+
+/* 首字下沉。一个字就把「这是一篇作品」和「这是一个网页」分开了，
+   而这个应用交付的东西恰恰是前者。
+
+   只在纯英文模式下给：中文模式那一屏的第一个字符是汉字，汉字下沉又大又方，
+   压在旁边的行上很难看。:has() 那条管的是「用户单独把第一句切成了中文」——
+   那时候也撤掉，免得下沉的是个汉字。
+
+   line-height: .78 是量出来的：serif 的大写字母顶端有一段内部留白，
+   按 1 给的话下沉块会比三行文字高出一截，右边的行包不住它。 */
+.doc.mode-en .para:first-of-type::first-letter {
+  float: left;
+  font-size: 3.1em;
+  line-height: .78;
+  padding: .06em .09em 0 0;
+  margin-right: .03em;
+  color: var(--accent);
+  font-weight: 600;
+}
+.doc.mode-en .para:first-of-type:has(> .s:first-child.zh-on)::first-letter {
+  float: none; font-size: inherit; line-height: inherit;
+  padding: 0; margin: 0; color: inherit; font-weight: inherit;
+}
 
 .s { cursor: pointer; border-radius: 3px; transition: background-color .12s var(--ease); }
 .s:hover { background: var(--accent-soft); }
