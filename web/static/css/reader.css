@@ -302,13 +302,63 @@ article.doc::before {
 }
 .panel-close:hover { background: var(--surface-2); color: var(--text); }
 
-.panel-word { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; padding-right: 34px; }
-.panel-word h2 { font-family: var(--serif); font-size: 27px; margin: 0; letter-spacing: -.02em; }
-.panel-gloss {
-  background: var(--surface-2); border-radius: var(--radius-sm);
-  padding: 11px 14px; margin-top: var(--sp-3); font-size: 14px;
+/* ---------------------------- 目录卡 ----------------------------
+   这个应用做的就是「一个词 + 它出现过的地方」，而图书馆的目录卡正是为
+   这件事发明的东西。所以词条面板的抬头照它做，不是为了复古，
+   是因为这个母题和功能真的对得上。
+
+   识别特征只留三个，多了就成插画了：
+     · 抬头下面一条粗横线（卡上印好的那条）
+     · 右上角放分类号的位置 —— 这里放 CEFR 等级
+     · 底部中间一个穿杆孔 —— 目录柜用一根钢杆把整抽屉的卡串起来
+   纸色比面板底再亮一点点，边缘一圈细线：它得像一张**放在**面板上的卡，
+   而不是面板本身的一段。 */
+.wordcard {
+  position: relative;
+  margin: 0 0 var(--sp-5);
+  padding: var(--sp-4) var(--sp-4) var(--sp-6);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--surface) 94%, #fff) 0%, var(--surface) 60%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--edge), var(--shadow-1);
 }
-.panel-forms { font-size: 12.5px; color: var(--muted); margin-top: var(--sp-2); }
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  .wordcard { background: var(--surface); }
+}
+/* 穿杆孔。目录柜靠一根钢杆穿过所有卡片，所以每张卡底部中间都有这个孔——
+   它是整张卡最一眼认得出的特征，也是最便宜的一处：一个伪元素。
+   孔要「凹」：内投影在上沿，和 --sunk 一个方向（光从上面来）。 */
+.wordcard::after {
+  content: "";
+  position: absolute; left: 50%; bottom: 12px;
+  width: 13px; height: 13px; margin-left: -6.5px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .22), 0 1px 0 rgba(255, 255, 255, .5);
+}
+
+.panel-word {
+  display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap;
+  padding-right: 34px; padding-bottom: var(--sp-2);
+  /* 卡上印好的那条抬头线。比别处的分隔线重一档——它是印刷在卡上的，
+     不是内容之间的分隔。 */
+  border-bottom: 2px solid var(--line);
+}
+.panel-word h2 { font-family: var(--serif); font-size: 27px; margin: 0; letter-spacing: -.02em; }
+/* 等级推到右边去，占分类号那个位置 */
+.panel-word .lv { margin-left: auto; }
+.panel-gloss {
+  background: transparent; border-radius: 0;
+  padding: 0; margin-top: var(--sp-3); font-size: 14px; line-height: 1.7;
+}
+.panel-gloss.faint { color: var(--faint); font-size: 13px; }
+.panel-forms { font-size: 12.5px; color: var(--muted); margin-top: var(--sp-3); }
+.wordcard-foot {
+  display: flex; gap: var(--sp-2); flex-wrap: wrap;
+  margin-top: var(--sp-4); padding-top: var(--sp-3);
+  border-top: 1px dashed var(--line);
+}
 .panel-label {
   font-size: 11.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
   color: var(--faint); margin: var(--sp-5) 0 var(--sp-2);

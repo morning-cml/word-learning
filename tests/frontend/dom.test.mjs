@@ -142,6 +142,11 @@ console.log('\n4. 词库页（筛选 / 搜索）');
   check('汇总条出现', !q(ctx, '#summaryCard').hidden);
   check('掌握程度画成点或标签',
         rows().every((r) => r.querySelector('.meter') || r.querySelector('.tag')));
+  //  书脊靠 data-level 着色 + 分线型。属性没打上的话整列退成一条灰边，
+  //  而那是**看不出来的**——它本来就淡，少了也不像坏了。
+  check('每行带着 CEFR 等级（书脊靠它着色）',
+        rows().every((r) => r.dataset.level !== undefined),
+        rows().map((r) => r.dataset.level || '空').join(','));
 
   const multiBtn = q(ctx, '#filters button[data-filter="multi"]');
   multiBtn.dispatchEvent(new ctx.w.MouseEvent('click', { bubbles: true }));
@@ -173,6 +178,9 @@ console.log('\n5. 文库页');
   check('每行有删除按钮', rows.every((r) => r.querySelector('.del')));
   check('线索列有值', rows.some((r) => /\d+\/\d+/.test(r.children[3].textContent)));
   check('标题链到阅读页', rows[0].querySelector('a[href^="/read/"]') !== null);
+  check('每行带着 CEFR 等级（书脊靠它着色）',
+        rows.every((r) => r.dataset.level !== undefined),
+        rows.map((r) => r.dataset.level || '空').join(','));
 }
 
 /* -------- 删除的二次确认 --------

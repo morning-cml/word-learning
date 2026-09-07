@@ -334,8 +334,11 @@ select { cursor: pointer; }
   padding: 2px 10px; border-radius: var(--radius-pill);
   border: 1px solid var(--line); background: var(--surface-2); color: var(--muted);
 }
-.chip.hit  { border-color: var(--ok);   color: var(--ok);   background: var(--ok-soft); }
-.chip.miss { border-color: var(--bad);  color: var(--bad);  background: var(--bad-soft); }
+/* 三种状态各配一种**线型**，不只靠颜色：命中实线填充、没写进去点线、
+   模型说塞不进虚线。skip 本来就是虚线，等于已经有一半了——
+   补上 miss 那一档，三者在灰度下也分得开。 */
+.chip.hit  { border-color: var(--ok);   color: var(--ok);   background: var(--ok-soft); border-style: solid; }
+.chip.miss { border-color: var(--bad);  color: var(--bad);  background: var(--bad-soft); border-style: dotted; }
 .chip.skip { border-color: var(--warn); color: var(--warn); background: transparent; border-style: dashed; }
 .chip.on   { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 button.chip { cursor: pointer; }
@@ -429,10 +432,14 @@ button.chip { cursor: pointer; }
 /* 行悬停加一条左侧色条。整行变底色只说明「鼠标在这儿」，
    而这两张表的行都是可以点开的——色条是那个「可以进去」的信号。
    用 box-shadow 画而不是 border-left：border 会占宽度，
-   一悬停整行内容左移 3px，扫过一列就是一片抖动。 */
-.table tbody tr { transition: background .12s var(--ease), box-shadow .12s var(--ease); }
+   一悬停整行内容左移 3px，扫过一列就是一片抖动。
+
+   **background-color 而不是 background 简写**：简写会把 background-image
+   一并重置成 none，而书脊（见下面 [data-level]）正是画在 background-image 上的——
+   写成简写的话，鼠标一放上去书脊就没了，而那恰恰是最想看清它的时刻。 */
+.table tbody tr { transition: background-color .12s var(--ease), background-size .12s var(--ease); }
 .table tbody tr:hover {
-  background: var(--surface-2);
+  background-color: var(--surface-2);
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
@@ -441,16 +448,47 @@ button.chip { cursor: pointer; }
    以前只画在那个小徽章上，等于同一份数据只用了一次。
    等级由 JS 打在 data-level 上，色值仍旧留在 CSS 里：
    inline style 会把颜色搬进 JS，那样换主题就管不到它了。 */
-.table tbody tr[data-level] { box-shadow: inset 3px 0 0 var(--row-lv, var(--line)); }
+/* **书脊同时编码颜色和线型。** 只靠颜色的编码对红绿色觉障碍（约 8% 的男性）
+   基本失效，而这一列的全部意义就是「扫一眼看出难度构成」——看不出颜色的人
+   等于这一列不存在。徽章那边有「B2」两个字母兜底，书脊这边没有，
+   所以得自己带一个冗余通道。
+
+   线型按 **A / B / C 三个能级**分，不是六级各来一种：六种线型分不清，
+   而且人本来就是按 A/B/C 想的（入门 / 中级 / 高级）。
+   同一能级内部再靠颜色分 1 和 2——两个通道叠起来才六档全分得开。
+     A 级 实线    —— 连续，最稳
+     B 级 长虚线
+     C 级 点线    —— 最碎，最难
+   「越难越碎」这个方向是刻意的，扫下来有个直觉上的梯度。
+
+   用 background-image 画而不是 border-left：border 会占宽度，
+   一悬停整行内容左移，扫过一列就是一片抖动。 */
+.table tbody tr[data-level] {
+  background-image: linear-gradient(var(--row-lv, var(--line)), var(--row-lv, var(--line)));
+  background-repeat: no-repeat;
+  background-size: 3px 100%;
+  background-position: 0 0;
+}
 .table tbody tr[data-level="A1"] { --row-lv: var(--lv-a1); }
 .table tbody tr[data-level="A2"] { --row-lv: var(--lv-a2); }
 .table tbody tr[data-level="B1"] { --row-lv: var(--lv-b1); }
 .table tbody tr[data-level="B2"] { --row-lv: var(--lv-b2); }
 .table tbody tr[data-level="C1"] { --row-lv: var(--lv-c1); }
 .table tbody tr[data-level="C2"] { --row-lv: var(--lv-c2); }
-/* 悬停时书脊加宽，颜色仍是它自己的等级色——不换成品牌色，
+
+/* B 级：长虚线。C 级：点线。A 级不写规则，保持上面那条实线。 */
+.table tbody tr[data-level^="B"] {
+  background-image: repeating-linear-gradient(to bottom,
+    var(--row-lv) 0 14px, transparent 14px 22px);
+}
+.table tbody tr[data-level^="C"] {
+  background-image: repeating-linear-gradient(to bottom,
+    var(--row-lv) 0 4px, transparent 4px 10px);
+}
+
+/* 悬停时书脊加宽，颜色和线型都保持它自己的——不换成品牌色，
    否则「这一行是什么难度」在最需要看的那一刻反而没了 */
-.table tbody tr[data-level]:hover { box-shadow: inset 5px 0 0 var(--row-lv, var(--accent)); }
+.table tbody tr[data-level]:hover { background-size: 5px 100%; box-shadow: none; }
 /* 行内的操作按钮平时收起来。原先每行最亮的元素是那个红色「删除」，
    而删除恰恰是这张表最不该被先看到的东西。 */
 .table tbody tr .row-act { opacity: 0; transition: opacity .12s var(--ease); }
@@ -611,6 +649,31 @@ button.chip { cursor: pointer; }
 .step.bad        { color: var(--bad); }
 .step.bad .dot   { color: var(--bad); }
 .step .sub { display: block; font-size: 12px; color: var(--faint); margin-top: 1px; }
+
+/* 刚写出来的那一句。用衬线 + 引号 + 左边一道竖线，和旁边所有「关于文章的话」
+   区分开——它是**文章本身**，是这一两分钟里唯一有内容的东西。
+   引号用 CSS 加，不进 JS：那是排版，不是数据。 */
+.step .quote {
+  display: block; margin-top: 5px; padding-left: 9px;
+  border-left: 2px solid var(--accent-soft);
+  font-family: var(--serif); font-size: 13.5px; line-height: 1.65;
+  color: var(--muted); font-style: italic;
+}
+.step .quote::before { content: "“"; }
+.step .quote::after  { content: "”"; }
+
+/* 正在写的那一步末尾一个闪烁的光标。这是「有人正在写」最省的一个信号——
+   转圈只说明「有东西在转」，光标说明的是「字正在被写出来」，
+   而这条管线此刻确实就在写字。
+   用 ::after 而不是往 DOM 里塞节点：JS 那边一个字都不用改。 */
+.step.active .body::after {
+  content: "";
+  display: inline-block; vertical-align: -1px;
+  width: 2px; height: 1em; margin-left: 3px;
+  background: var(--accent);
+  animation: caret 1.05s steps(1) infinite;
+}
+@keyframes caret { 0%, 45% { opacity: 1; } 50%, 100% { opacity: 0; } }
 
 .spinner {
   display: inline-block; width: 11px; height: 11px; vertical-align: -1px;

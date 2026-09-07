@@ -54,14 +54,18 @@ class Timeline {
     this.current = null;
   }
 
-  /** 一次性的一行，不进入「进行中」状态。 */
-  line(text, sub = '', tone = '') {
+  /** 一次性的一行，不进入「进行中」状态。
+   *  quote 传原文摘录——它和 sub 分开，因为两者是两种东西：
+   *  sub 是这一步的结论（灰、小字、无衬线），quote 是刚写出来的正文
+   *  （衬线、带引号），要看得出来那是故事本身。 */
+  line(text, sub = '', tone = '', quote = '') {
     this.settle();
     const row = document.createElement('div');
     row.className = 'step' + (tone ? ' ' + tone : '');
     row.innerHTML = `<span class="dot">${tone === 'bad' ? '!' : '·'}</span>`
       + `<span class="body">${escapeHtml(text)}`
       + (sub ? `<span class="sub">${escapeHtml(sub)}</span>` : '')
+      + (quote ? `<span class="quote">${escapeHtml(quote)}</span>` : '')
       + `</span>`;
     this.el.appendChild(row);
     return row;
@@ -72,6 +76,21 @@ class Timeline {
 
 /* ------------------------------ 事件分发 ------------------------------
    一类事件一个处理函数。管线以后加事件类型，这里加一条就行。 */
+
+/** 从刚写完的这一段里摘一句给用户看。
+ *
+ *  等待是这条管线最难受的部分：一篇要跑一两分钟，而在这之前时间线上滚过去的
+ *  全是「第 2/3 段：confess、hesitate」这种**关于**文章的话，一个字正文都没有。
+ *  把刚写出来的第一句摘出来，等待就从「进度汇报」变成**看着故事被写出来**——
+ *  而那正是这个产品在做的事。
+ *
+ *  只摘第一句、且只到 88 个字符：这是时间线上的一行，不是预览窗。 */
+function excerpt(para) {
+  const en = (para?.sentences || []).map((s) => s.en).find((s) => s && s.trim());
+  if (!en) return '';
+  const one = en.trim();
+  return one.length > 88 ? one.slice(0, 87).trimEnd() + '…' : one;
+}
 
 const STAGE_TEXT = {
   plan: '正在选题', write: '正在写正文', repair: '正在修复这一段',
@@ -108,7 +127,7 @@ const EVENT_HANDLERS = {
     // （两个分支都返回空串），于是它和一段全 strong 的长得一模一样。
     const weak = audits.some((a) => a.strength !== 'strong');
     ui.tl.settle();
-    ui.tl.line(`第 ${ev.index} 段完成`, detail, weak ? 'bad' : '');
+    ui.tl.line(`第 ${ev.index} 段完成`, detail, weak ? 'bad' : '', excerpt(ev.paragraph));
   },
 
   retry: (ev, ui) => {

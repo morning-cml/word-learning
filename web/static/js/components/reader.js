@@ -441,18 +441,30 @@ export class WordPanel {
       </div>`;
     }).join('') || '<div class="empty">还没有语境</div>';
 
+    /* 抬头做成一张**图书馆目录卡**。这不是随便挑的母题：这个应用做的就是
+       「一个词 + 它出现过的地方」，而目录卡正是为这件事发明的东西——
+       抬头是词、下面是它在哪些册子里出现过。
+
+       卡片的识别特征只有三个，多了就成了插画：抬头下面那条粗横线、
+       右上角的分类号位置（这里放 CEFR 等级）、底部中间那个穿杆孔。
+       孔是 CSS 画的（.wordcard::after），不占 DOM。 */
     this.el.innerHTML = `<div class="panel-inner">
       <button class="panel-close" title="关闭 (Esc)">×</button>
-      <div class="panel-word">
-        <h2>${escapeHtml(w.lemma)}</h2>
-        ${lvBadge(w.cefr)}
-        <span class="tag">见过 ${Number(w.times_seen) || 0} 次</span>
-        ${w.distinct_articles > 1
-          ? `<span class="tag ok">${Number(w.distinct_articles)} 篇不同文章</span>` : ''}
+      <div class="wordcard">
+        <div class="panel-word">
+          <h2>${escapeHtml(w.lemma)}</h2>
+          ${lvBadge(w.cefr)}
+        </div>
+        ${w.gloss ? `<div class="panel-gloss">${escapeHtml(w.gloss)}</div>`
+                  : '<div class="panel-gloss faint">还没有释义</div>'}
+        ${w.forms?.length
+          ? `<div class="panel-forms">文中出现过的形态：${w.forms.map(escapeHtml).join('、')}</div>` : ''}
+        <div class="wordcard-foot">
+          <span class="tag">见过 ${Number(w.times_seen) || 0} 次</span>
+          ${w.distinct_articles > 1
+            ? `<span class="tag ok">${Number(w.distinct_articles)} 篇不同文章</span>` : ''}
+        </div>
       </div>
-      ${w.gloss ? `<div class="panel-gloss">${escapeHtml(w.gloss)}</div>` : ''}
-      ${w.forms?.length
-        ? `<div class="panel-forms">文中出现过的形态：${w.forms.map(escapeHtml).join('、')}</div>` : ''}
 
       <div class="panel-label">掌握程度</div>
       <div class="status-row">
