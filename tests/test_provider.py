@@ -228,3 +228,31 @@ def test_真实配置里每个模型都解析得出来():
             resolved = spec.for_model(model.id)
             assert resolved.base_url == spec.base_url, f"{pid}/{model.id}"
             assert isinstance(resolved.reasoning.budget(1000), int)
+
+
+# --------------------------------------------- JSON 兜底层的仪表走不走得通
+#
+# jsonfix 报出「是第几层修好的」之后，这个信号要一路走到 stats 才有用。
+# 中间少一环，界面上那一行就永远不出现——而它长得和「一切正常」一模一样
+# （第 12b 条）。所以这一条走的是真的 LLM + 真的 provider，只把 HTTP 换掉。
+
+
+def test_兜底层的层名一路记进_Usage(respond):
+    """模型先吐一个套着围栏的，再吐一个原样的：两层都要各记一次。"""
+    from core.llm import jsonfix
+    from core.llm.client import LLM
+
+    bodies = ['```json\n{"ok": 1}\n```', '{"ok": 2}']
+
+    def handler(_req):
+        return httpx.Response(200, json={
+            "model": "deepseek-v4-pro",
+            "choices": [{"message": {"content": bodies.pop(0)}, "finish_reason": "stop"}],
+            "usage": {"total_tokens": 10},
+        })
+
+    respond(handler)
+    llm = LLM(provider=_provider(), model="deepseek-v4-pro")
+    assert llm.json([{"role": "user", "content": "hi"}]) == {"ok": 1}
+    assert llm.json([{"role": "user", "content": "hi"}]) == {"ok": 2}
+    assert llm.usage.json_layers == {jsonfix.LAYER_FENCE: 1, jsonfix.LAYER_DIRECT: 1}

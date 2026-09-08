@@ -28,6 +28,11 @@
 掌握程度和累计语境不能，它们是一次次阅读攒出来的。动存储相关的代码时，
 先想清楚出错会不会把这份资产变脏，以及能不能恢复。
 
+背单词的**词书顺序**也在这一档：那是用户对着纸质书一页页敲进去的，
+删掉只能再敲一遍。参考词典（`data/wordbook/dict.csv`）反过来是可再生的——
+跑一次 `scripts/build_wordbook_dict.py` 就有。两者分开存不是洁癖，
+是因为「能不能重来」不一样。
+
 ## 结构
 
 ```
@@ -35,12 +40,18 @@ core/     业务地基，不依赖上层
   provider/  模型接入（OpenAI 兼容；各家偏差用 Capabilities/Quirks 显式声明）
   llm/       调用、重试、JSON 四层兜底解析
   lexicon/   CEFR 分级、词形还原、超纲检测
-  store/     SQLite + 启动前快照
+  wordbook/  词书：参考词典（dictionary）+ 录入与进度（store）
+             + 间隔重复（scheduler，包着 FSRS，装不上就自己关掉）
+  store/     SQLite + 启动前快照 + CSV 导出（export）
   health.py  四层正确性检验
 tasks/    「一件能对着词表做的事」。新增功能在这里加子类，core/ 和 web/ 不用改
 web/      唯一一套界面。pages.py 是页面注册表，加页面改这里一行
 main.py   唯一入口：起本地服务 + 用 Edge 打开。跑在浏览器里，没有第二套 UI
 ```
+
+`tasks/` 装的是**要调模型**的功能（拼 prompt → 要 JSON → 校验 → 修复 → 落库）。
+背单词不调模型，所以它不在 `tasks/` 下，而是 `core/wordbook/` + 一个页面。
+判据是「这件事需不需要模型」，不是「它是不是一个功能」。
 
 依赖方向单向：`web/` → `tasks/` → `core/`。`core/` 里不要 import 上层。
 唯一的例外是 `core/health.py` 的 L4，它必须 import 任务层真正在跑的那段 prompt——
@@ -50,6 +61,14 @@ main.py   唯一入口：起本地服务 + 用 Edge 打开。跑在浏览器里�
 
 下面是最常撞上的几条。**完整清单在 [需要注意.md](需要注意.md)**——
 那里按「什么改动会让它重现」组织，每条都标了有没有测试盯着。
+
+**难度标尺有两个数据源，顺序不能反。** CEFR-J（`data/cefr.csv`，8653 条，人工分级）
+查不到时才回落到词频（`data/wordbook/dict.csv` 的 `frq`，33217 条）。
+**只回落不覆盖**，**没有证据就不放行**——两条都写在 `cefr.FREQ_CUTOFFS` 上面。
+阈值是标定出来的，改之前先读那段注释和 需要注意.md 第 19b 条：
+第一次标定量出来的 95% 精度是**错的**（基率偏移），实际泄漏 16%。
+另外，动了标尺就要同时看 `level_counts()`——首页显示的「各档累计词汇量」
+必须和程序实际拦的口径一致，否则又是一处「界面说的 ≠ 实际做的」。
 
 **模型返回的 json 形状不可信。** `json_schema` 只有 Kimi 会真的执行，
 DeepSeek 收下也不生效。任何 `llm.json()` 的返回值都要先过
@@ -71,18 +90,31 @@ python.exe），以及报错有地方显示。改用 `pythonw` / `start` 隐藏�
 （uvicorn 就是），而异常死在后台线程里，表现出来只是「双击没反应」。
 
 **改 CSS 之后 jsdom 测试给不了任何保证。** 它没有布局引擎，
-`offsetHeight` 恒为 0，CSS 完全不参与。视觉改动要自己开浏览器看，
-或者用 puppeteer-core 指向本机 Chrome 截图。
+`offsetHeight` 恒为 0，位置、尺寸、绘制顺序一律测不出来。
+视觉改动要自己开浏览器看，或者用 puppeteer-core 指向本机 Chrome 截图。
+
+一个例外，别把它和上面那条混起来：**层叠是算得出来的**。把 `<link>` 换成
+内联 `<style>` 之后，简单选择器上的 `getComputedStyle(el).display` 是准的。
+`dom.test.mjs` 第 11 组就靠这个——凡是标了 `hidden` 的元素，算出来的
+`display` 必须是 `none`。这条值得有，因为 `hidden` 依赖的是 UA 样式表里的
+`[hidden] { display: none }`，而**作者样式无论特异性高低都盖过 UA 样式**：
+给某个类写一句 `display: flex`，挂在它身上的 `hidden` 就当场失效，
+而 `el.hidden === true` 这种断言照样是绿的。这坑已经踩到第五次了。
 
 ## 跑测试
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-pytest                                  # Python，467 项
+pytest                                  # Python，561 项
 
 cd tests/frontend
-npm install && python make_fixtures.py && npm test    # 前端，145 项
+npm install && python make_fixtures.py && npm test    # 前端，224 项
 ```
+
+**页面清单不要再写死第二份。** `tests/test_version.py` 和
+`tests/frontend/make_fixtures.py` 都从 `web/pages.py` 的注册表现算路径——
+它们原来各自手写了一份五条的清单，加背单词页时两处都没跟上，
+于是新页面在两套测试里都是一言不发（需要注意.md 第 20 条）。
 
 测试全部离线：涉及模型的用 `conftest.py` 里的 `FakeLLM`，返回什么由测试决定。
 真去调模型的测试跑不稳、要花钱，而且验不了「模型返回畸形数据时会怎样」——

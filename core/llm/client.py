@@ -25,6 +25,9 @@ class Usage:
     completion_tokens: int = 0
     total_tokens: int = 0
     ms: int = 0
+    #: jsonfix 的哪一层修好的 -> 次数。顺风路径全是 "direct"；
+    #: 别的层出现得多，说明这条链路上有事情不对（见 jsonfix.loads_reported）。
+    json_layers: dict[str, int] = field(default_factory=dict)
 
     def add(self, res: ChatResult) -> None:
         self.calls += 1
@@ -33,6 +36,9 @@ class Usage:
         self.prompt_tokens += int(u.get("prompt_tokens") or 0)
         self.completion_tokens += int(u.get("completion_tokens") or 0)
         self.total_tokens += int(u.get("total_tokens") or 0)
+
+    def note_layer(self, layer: str) -> None:
+        self.json_layers[layer] = self.json_layers.get(layer, 0) + 1
 
 
 @dataclass
@@ -131,7 +137,11 @@ class LLM:
             if res.truncated:
                 self._emit("retry", attempt=attempt, reason="输出被 max_tokens 截断，尝试救回")
             try:
-                return jsonfix.loads(res.text)
+                got, layer = jsonfix.loads_reported(res.text)
+                # 记下是第几层修好的。顺风路径也记（"direct"），因为
+                # 「五层里只有第一层响过」本身就是要报的结论之一。
+                self.usage.note_layer(layer)
+                return got
             except jsonfix.JsonParseError as exc:
                 last_err = exc
                 self._emit("retry", attempt=attempt, reason="JSON 解析失败")

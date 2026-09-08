@@ -667,6 +667,11 @@ class ArticleTask(Task):
             "clue_fixes": clue_fixes,
             "audits": audits,
             "llm_calls": llm.usage.calls,
+            # 这一篇里 jsonfix 的哪几层响过。顺风路径应该全是 "direct"——
+            # 别的层出现得多说明这条链路上有事情不对（见 jsonfix.loads_reported）。
+            # 存进 stats 而不是只在日志里说一声：这个数只有攒起来才看得出趋势，
+            # 而文章本来就一篇篇存着。
+            "json_layers": dict(llm.usage.json_layers),
             "tokens": llm.usage.total_tokens,
             "ms": llm.usage.ms,
         }

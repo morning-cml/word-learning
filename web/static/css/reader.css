@@ -276,9 +276,11 @@ article.doc::before {
   background: var(--surface); border-left: 1px solid var(--line);
   box-shadow: var(--shadow-3);
   transform: translateX(101%);
-  /* 进出用两条不同的曲线：进来带一点点过冲（--ease-spring），
-     像抽屉推到底轻轻一顿；出去纯 ease-out，干脆收走不回弹——
-     回弹着离开会让人以为它还要回来。 */
+  /* 进出用两条不同的曲线：进来走真弹簧（--spring-soft，见 tokens.css），
+     稳稳落位、几乎不过冲——面板是 430px 的一大块，弹一下会显得轻浮；
+     出去纯 ease-out，干脆收走不回弹——回弹着离开会让人以为它还要回来。
+     （这里原先写的是「带一点点过冲（--ease-spring）」，那是 b254493
+     换成真弹簧之前的事，换的时候没跟着改。） */
   transition: transform var(--dur-3) var(--ease-out);
   overflow-y: auto;
   overscroll-behavior: contain;   /* 面板滚到底不要带着正文一起滚 */
@@ -299,6 +301,20 @@ article.doc::before {
   position: absolute; top: 12px; right: 14px;
   width: 30px; height: 30px; padding: 0; line-height: 1; font-size: 18px;
   border-radius: 50%; border: none; background: transparent; color: var(--muted);
+  /* **必须显式压过目录卡。** 两者都是定位元素（这个 absolute、.wordcard
+     relative）、都没写 z-index，于是绘制顺序退回 DOM 顺序——而按钮在
+     draw() 生成的 HTML 里排在卡片**前面**，后画的卡片就把它整个盖住了：
+     卡片有不透明底，所以不是「压在上面一点」，是这个 × 既看不见也点不动。
+     实测 elementFromPoint 打在按钮正中，返回的是 .wordcard。
+
+     两侧各自都读得通，所以 grep 任何一边都看不出问题：按钮一直在那儿、
+     卡片只是加了个 position: relative（为了底部那个穿杆孔的伪元素）。
+     它是「目录卡」那一版顺手带出来的——在那之前 .panel-word 不是定位元素，
+     没有东西能盖住按钮。
+
+     关掉面板还剩 Esc 和「点另一个词」两条路，所以不会卡死，也就没人会报：
+     用户只会以为这个面板本来就没有关闭按钮（需要注意.md 第 15d 条）。 */
+  z-index: 1;
 }
 .panel-close:hover { background: var(--surface-2); color: var(--text); }
 

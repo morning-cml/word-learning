@@ -125,7 +125,11 @@ code {
 .brand .mark {
   width: 21px; height: 21px; flex: none; display: block;
   color: var(--text);
-  /* 悬停时那道荧光笔亮一档。整个标识就一处彩色，动它一下最省、也最点题 */
+  /* 悬停时整个标识轻轻歪一下、放大一点点，像被拿起来看了一眼。
+     只动 transform：色值在 _mark.html 里是 currentColor 和 var(--target)，
+     跟着主题走，从这里改会把那条「标识只定义在一个地方」的规矩破掉。
+     （注释原先写的是「那道荧光笔亮一档」——从来没有这条规则，
+     而且 transition 只列了 transform，写了也不会有过渡。） */
   transition: transform var(--dur-2) var(--spring-snap);
 }
 .brand:hover .mark { transform: rotate(-3deg) scale(1.06); }
@@ -963,6 +967,251 @@ button.offender.ignored::after { content: "✓"; margin-left: 2px; }
 .recent a:hover { background: var(--surface-2); text-decoration: none; }
 .recent .t { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.4; }
 .recent .m { display: flex; align-items: center; gap: var(--sp-2); margin-top: 3px; font-size: 12px; color: var(--faint); }
+
+/* ============================== 阅读走势 ==============================
+   「累计语境是一次次读攒出来的」是这个应用的价值主张，可界面上一直只有三个
+   快照数——看不出它在长。数据早就入库了（Article.created_at + stats.word_count），
+   这一块零 schema 改动。
+
+   形状是**单序列日柱**，不是折线：这个应用一周也就生成几篇，中间大片是零。
+   折线穿过零点会画出「一直在读」的假象，柱子的空档本身就是信息——
+   「连续几天」那个数正是从空档来的。
+
+   单序列所以没有图例（标题已经说了画的是什么），也没有 y 轴：只直接标出
+   最高那一天（dataviz：直接标注优先于网格线，而且绝不每根柱子都标数）。 */
+
+.reading { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--rule); }
+.reading[hidden] { display: none; }
+
+.reading-head {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4);
+  margin-bottom: var(--sp-3);
+}
+.reading-title { font-size: 13px; color: var(--muted); }
+.reading-figure { font-family: var(--mono); font-size: 13px; color: var(--text); }
+/* 单个数用比例数字：等宽只在竖着对齐的地方才有意义（dataviz 的 anti-pattern） */
+.reading-figure b { font-size: 15px; font-weight: 700; font-variant-numeric: normal; }
+.reading-note { margin-left: auto; font-size: 12px; color: var(--faint); }
+
+/* 柱区。overflow-x 兜住窄屏：宁可横向滚，也不要把柱子压成看不清的细线。
+   浮层不能放在这个滚动容器里面：**CSS 规定一个轴非 visible 时，另一个轴的
+   visible 会计算成 auto**，所以 overflow-x: auto 同时把纵向也裁了，
+   而浮层是往上弹的——它会被整个裁掉，永远不出现。所以外面套一层
+   .reading-frame 当定位参照，浮层挂在那一层上。 */
+.reading-frame { position: relative; }
+.reading-plot { overflow-x: auto; padding-top: 14px; }
+.reading-days {
+  display: flex; align-items: flex-end; gap: 2px;   /* 2px 表面间隙，不画描边 */
+  height: 56px; min-width: 100%;
+  border-bottom: 1px solid var(--line);              /* 基线：实线 hairline */
+}
+.reading-day {
+  flex: 1 1 0; min-width: 5px; max-width: 24px;      /* 柱子封顶 24px，别填满槽位 */
+  display: flex; align-items: flex-end; height: 100%;
+  background: none; border: none; padding: 0; box-shadow: none; cursor: default;
+}
+.reading-day:hover, .reading-day:focus-visible { background: var(--accent-soft); }
+.reading-day i {
+  display: block; width: 100%;
+  background: var(--chart-bar);
+  border-radius: 4px 4px 0 0;                        /* 数据端圆，基线端方 */
+}
+/* 没读的那天不画任何东西。
+   原来这里给了一道贴基线的 2px 短横，想的是「留白会让人分不清那天没读还是
+   没数据」。渲染出来一看不行：一排短横连成了一条**虚线**，正是 dataviz
+   反模式里那条「虚线坐标轴」——它读起来是装饰噪声，还把下面真正的实线基线
+   盖住了。改成不画：基线是连续的实线，范围写在坐标轴上，没有柱子就是零。
+   「这天没读」由悬停浮层回答，鼠标停上去还有一块底色反馈。 */
+.reading-day.zero i { display: none; }
+
+.reading-peak {
+  position: absolute; top: 0;
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+}
+.reading-axis {
+  display: flex; justify-content: space-between;
+  margin-top: 6px; font-size: 11px; color: var(--faint);
+}
+
+/* 悬停浮层。柱子很细，所以浮层跟着柱子走而不是跟着鼠标——
+   跟鼠标的话在 5px 宽的柱子上会一直抖。 */
+.reading-tip {
+  position: absolute; z-index: 5; bottom: 100%; margin-bottom: 8px;
+  transform: translateX(-50%);
+  padding: 6px 10px; border-radius: var(--radius-sm);
+  background: var(--surface); border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  font-size: 12px; line-height: 1.5; white-space: nowrap;
+  opacity: 0; pointer-events: none; transition: opacity var(--dur-1) var(--ease);
+}
+.reading-tip.show { opacity: 1; }
+.reading-tip b { font-family: var(--mono); }
+
+/* ============================== 背单词 ==============================
+   录入 → 核对 → 背。三样东西的视觉分工：
+     进度条  一眼看出「这一单元背到哪了」，分三段而不是一个百分比；
+     单元卡  一眼看出它覆盖书上的哪几页；
+     词卡    翻面之前只有词和音标，别的一律不给——先检索再验证。 */
+
+.inline-check {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--muted); cursor: pointer;
+}
+.inline-check input { width: auto; box-shadow: none; }
+
+/* 下拉框 + 一个「＋」。新建走内联输入行（.inline-new）而不是 prompt()：
+   模态框会把整个页面卡住，而这一页是要连着录十几遍的。
+
+   **名字是 field-pick 不是 pick**：`.pick` 已经被首页那个「推荐」徽章占了
+   （橙底白字的小药丸）。同名的话，那条规则里我没重写的属性会漏过来——
+   实际发生过：下拉框左右两端渗出两道橙色，而两处 CSS 单独读都对。
+   这个文件已经一百多个类名且没有命名空间，加组件前先 grep 一下类名。 */
+.field-pick { display: flex; gap: 6px; }
+.field-pick select { min-width: 0; }
+.field-pick button { flex: none; padding: 0 10px; }
+.inline-new {
+  display: flex; gap: 6px; align-items: center; margin-top: var(--sp-2);
+  padding: var(--sp-2); border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--accent);
+}
+.inline-new[hidden] { display: none; }
+.inline-new input { flex: 1; min-width: 0; }
+
+/* ---- 进度条：已掌握 / 学习中 / 还没背 ----
+   分段而不是一个百分比：「90 个词里 12 个掌握、30 个在学」和「47%」
+   不是一回事，后者把「学到一半」和「还没开始」抹平了。 */
+.prog { display: flex; align-items: center; gap: var(--sp-2); }
+.prog-track {
+  flex: 1; min-width: 0; display: flex; height: 6px;
+  border-radius: 3px; overflow: hidden;
+  background: var(--surface-sunken); box-shadow: var(--sunk);
+}
+.prog-track i { display: block; height: 100%; }
+.prog-known    { background: var(--ok); }
+.prog-learning { background: var(--warn); opacity: .75; }
+.prog b {
+  flex: none; font-family: var(--mono); font-size: 12px;
+  font-weight: 600; color: var(--muted);
+}
+
+/* ---- 单元卡 ---- */
+.unit-grid {
+  display: grid; gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+.unit {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text);
+  box-shadow: var(--edge);
+  transition: border-color .12s var(--ease), transform var(--dur-2) var(--ease-out);
+}
+.unit:hover {
+  text-decoration: none; border-color: var(--accent); transform: translateY(-1px);
+}
+.unit-head { display: flex; align-items: baseline; gap: var(--sp-2); }
+.unit-label { font-family: var(--serif); font-size: 16px; font-weight: 600; }
+/* 页码范围是「和纸质版对得上」的凭据，给它等宽字体和自己的颜色 */
+.unit-pages {
+  margin-left: auto; font-family: var(--mono); font-size: 11.5px;
+  color: var(--accent); white-space: nowrap;
+}
+.unit-meta { font-size: 12px; color: var(--faint); }
+/* 「今天该复习几个」是这张卡上唯一**要行动**的信息，所以它不能和「N 词」
+   一样淡。接了间隔重复却不在选单元的地方显示，等于用户还得逐个点进去试。 */
+.unit-due { color: var(--accent); font-weight: 600; }
+
+/* ============================== 背诵页 ============================== */
+
+.drill-body { max-width: var(--page-max); margin: 0 auto; padding: var(--sp-6) var(--sp-5) var(--sp-8); }
+.drill-where { font-size: 12.5px; color: var(--muted); font-family: var(--mono); }
+.drill-progress { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
+.drill-pages { width: auto; padding: 4px 8px; font-size: 12.5px; }
+
+/* 词卡坐在一张纸上，和阅读页那张是同一个母题——两处都是「书里的一页」。 */
+.drill-card {
+  max-width: 560px; margin: var(--sp-6) auto 0;
+  padding: var(--sp-7) var(--sp-6) var(--sp-6);
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  box-shadow: var(--edge), var(--shadow-2);
+}
+.drill-word {
+  font-family: var(--serif); font-size: 40px; font-weight: 600;
+  letter-spacing: -.02em; line-height: 1.15; color: var(--text);
+  /* 词形要能选中复制：查别的词典、贴进搜索框都要用 */
+  user-select: text;
+}
+.drill-phonetic {
+  font-family: var(--mono); font-size: 15px; color: var(--muted); margin-top: 6px;
+}
+.drill-page {
+  font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-top: var(--sp-3);
+}
+
+.drill-back {
+  margin-top: var(--sp-5); padding-top: var(--sp-5);
+  border-top: 2px solid var(--line);
+  text-align: left;
+  animation: stat-in var(--dur-spring-soft) var(--spring-soft) both;
+}
+.drill-translation { font-size: 16px; line-height: 1.75; color: var(--text); }
+
+.forms-row {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px;
+  margin-top: var(--sp-3);
+}
+.forms-key { font-size: 11.5px; color: var(--faint); min-width: 30px; }
+.form {
+  font-family: var(--mono); font-size: 12px;
+  padding: 1px 8px; border-radius: var(--radius-pill);
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--muted);
+}
+.form i { font-style: normal; color: var(--faint); margin-right: 5px; }
+
+/* 用户自己写的笔记（书上的词根 / 联想）。给它衬线体和一道左缘线，
+   和上面那些程序配来的字段分开——那是他自己的东西。 */
+.drill-usernote {
+  margin-top: var(--sp-4); padding-left: 10px;
+  border-left: 2px solid var(--accent-soft);
+  font-family: var(--serif); font-size: 14px; line-height: 1.7; color: var(--muted);
+}
+
+.drill-seen { margin-top: var(--sp-4); }
+.seen-link {
+  padding: 0; border: none; background: none; box-shadow: none;
+  font-size: 12.5px; color: var(--ok); cursor: pointer;
+}
+.seen-link:hover { text-decoration: underline; box-shadow: none; transform: none; }
+
+.drill-actions { margin-top: var(--sp-6); }
+.drill-flip { width: 100%; padding: 12px; }
+.drill-judge { display: flex; gap: var(--sp-3); }
+/* **写了 display 就必须补这一条。** `hidden` 是 UA 样式表里的
+   `[hidden] { display: none }`，而作者样式无论特异性高低都盖过 UA 样式——
+   上面那个 `display: flex` 一写，`hidden` 就失效了。
+   后果不是「多露一行」：翻面前那两个判定按钮一直摆在那儿，而且点得动，
+   于是可以没看释义就按「认识」，把进度推上去——这一页存在的理由
+   （先自己检索再验证）就没了。
+   jsdom 那边断言的是 `el.hidden === true`，属性确实是 true，所以测试照样绿
+   （CLAUDE.md：改 CSS 之后 jsdom 给不了任何保证）。
+   同一条坑在 .del-warn / .empty-state / .inline-new / .typo-pop 上各踩过一次。 */
+.drill-judge[hidden] { display: none; }
+.drill-judge button { flex: 1; padding: 12px; }
+
+/* ---- 词表视图：对着书核顺序 ---- */
+/* 词典里没有的词照样按原位录进去（否则那一页就和书对不上了），
+   但要看得出来它的释义是空的、等着你自己补——不标的话它和一个
+   「释义恰好很短」的词长得一样。 */
+.need-fill { font-size: 12.5px; color: var(--warn); }
+.entry-word { font-family: var(--serif); font-size: 15px; }
+.entry-note { margin-top: 3px; }
+.editor-row td { background: var(--surface-2); }
+.entry-editor { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-2) 0; }
+.entry-editor textarea { min-height: 0; font-family: var(--sans); font-size: 13.5px; }
 
 /* ============================== 响应式 ============================== */
 

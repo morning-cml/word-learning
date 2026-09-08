@@ -38,10 +38,16 @@ class Page:
 PAGES: tuple[Page, ...] = (
     Page(id="index",    path="/",                    label="生成", title="生成文章", icon="✎"),
     Page(id="library",  path="/library",             label="文库", title="文库",     icon="▤"),
+    # nav_match 而不是精确匹配：背某个单元时（/study/7）导航仍然该高亮「背单词」。
+    # 精确匹配的话，一进背诵页顶栏就没有任何一项是亮的，看着像离开了这个功能。
+    Page(id="study",    path="/study",               label="背单词", title="背单词", icon="▦",
+         nav_match="/study"),
     Page(id="words",    path="/words",               label="词库", title="词库",     icon="◈"),
     Page(id="settings", path="/settings",            label="设置", title="设置",     icon="⚙"),
     Page(id="reader",   path="/read/{article_id:int}", label="阅读", title="阅读",
          in_nav=False, nav_match="/read/"),
+    Page(id="drill",    path="/study/{unit_id:int}",  label="背诵", title="背诵",
+         in_nav=False),
 )
 
 

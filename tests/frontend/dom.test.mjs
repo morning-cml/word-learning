@@ -253,6 +253,70 @@ console.log('\n5. 文库页');
 }
 
 /* ============================ 设置页 ============================ */
+/* -------- 阅读走势 --------
+   单序列日柱。**空档必须画出来**——接口只回有文章的那几天，而没读的那些天
+   正是要看的东西（「连续几天」就是从空档来的）。前端不补齐的话，
+   一条断断续续的记录会被画成一条连续的柱阵，看着像天天都在读。 */
+{
+  const days = [
+    { date: '2026-09-01', words: 200, articles: 1, total: 200 },
+    { date: '2026-09-03', words: 450, articles: 2, total: 650 },
+    { date: '2026-09-04', words: 120, articles: 1, total: 770 },
+  ];
+  const ctx = boot('library', { routes: {
+    '/api/reading/history?days=56': {
+      days, streak: 2, total_words: 770, total_articles: 4, missing_word_count: 2 },
+  } });
+  const mod = await import(JS('pages/library.js'));
+  await mod.init({});
+  await new Promise((r) => setTimeout(r, 40));
+
+  check('走势区出现', !q(ctx, '#reading').hidden);
+  const bars = qa(ctx, '#readingDays .reading-day');
+  check('按天补齐了空档，不是只画有数据的三天', bars.length === 56, `${bars.length} 根`);
+  const zeros = qa(ctx, '#readingDays .reading-day.zero');
+  check('没读的那些天标成 zero', zeros.length === 53, `${zeros.length} 天`);
+  check('最后一天是接口给的最后一天',
+        bars[bars.length - 1].dataset.date === '2026-09-04',
+        bars[bars.length - 1].dataset.date);
+
+  check('累计词数报出来', /770/.test(q(ctx, '#readingTotals').textContent));
+  check('连续天数报出来', /连续.*2.*天/.test(q(ctx, '#readingTotals').textContent),
+        q(ctx, '#readingTotals').textContent);
+  //  早期文章没记字数，不说的话那几天画成 0，看着像那天没读
+  check('没有字数记录的文章如实说明',
+        /2 篇/.test(q(ctx, '#readingNote').textContent), q(ctx, '#readingNote').textContent);
+
+  //  只标最高那一天，绝不每根柱子都标数（dataviz：直接标注要稀疏才起作用）
+  check('只直接标出最高的那一天', qa(ctx, '#readingPlot .reading-peak').length === 1);
+  check('峰值标的是 450', /450/.test(q(ctx, '#readingPlot .reading-peak').textContent));
+
+  //  柱子很细，悬停必须给得出是哪一天
+  const bar = bars.find((b) => b.dataset.date === '2026-09-03');
+  bar.dispatchEvent(new ctx.w.MouseEvent('mouseover', { bubbles: true }));
+  check('悬停给出这一天的明细',
+        q(ctx, '#readingTip').classList.contains('show')
+        && /2026-09-03/.test(q(ctx, '#readingTip').textContent)
+        && /450/.test(q(ctx, '#readingTip').textContent),
+        q(ctx, '#readingTip').textContent);
+  const empty = bars.find((b) => b.classList.contains('zero'));
+  empty.dispatchEvent(new ctx.w.MouseEvent('mouseover', { bubbles: true }));
+  check('空档也说得出是哪一天', /这天没读/.test(q(ctx, '#readingTip').textContent));
+}
+
+/* 一条记录都没有时整块不出现：画一条全零的线比不画更糟——
+   它看着像「读了但都是 0 词」。 */
+{
+  const ctx = boot('library', { routes: {
+    '/api/reading/history?days=56': {
+      days: [], streak: 0, total_words: 0, total_articles: 0, missing_word_count: 0 },
+  } });
+  const mod = await import(JS('pages/library.js'));
+  await mod.init({});
+  await new Promise((r) => setTimeout(r, 40));
+  check('没有阅读记录时整块不出现', q(ctx, '#reading').hidden);
+}
+
 console.log('\n6. 设置页');
 {
   const ctx = boot('settings');
@@ -287,6 +351,67 @@ console.log('\n7. 结果面板');
   check('线索不足有提醒', host.textContent.includes('语境线索不足'));
   check('unplaced 有专门说明', host.textContent.includes('没有硬塞'));
   check('超纲词列出', host.textContent.includes('quixotic'));
+  check('顺风路径不提重写', !host.textContent.includes('被重写过'));
+}
+
+/* -------- 这一篇重写过几次 --------
+   修复和补线索在顺风路径上一次都不发生，发生了就是那一段没写对、花了第二次钱
+   重写它。两个数一直算着也一直入库，却只在生成当时的时间线里露过面——从文库
+   打开一篇旧文章就看不到了，而那才是真要判断它值不值得读的时候。 */
+{
+  const ctx = boot('index');
+  const { renderStats } = await import(JS('components/stats.js'));
+  const el = q(ctx, '#stats');
+  const base = { targets_hit: 2, targets_total: 2, word_count: 200,
+                 sentence_count: 12, offender_rate: 0 };
+
+  renderStats(el, { ...base, repairs: 2, clue_fixes: 1 }, ['abandon']);
+  check('重写次数报出来', /被重写过/.test(el.textContent) && /3/.test(el.textContent),
+        el.textContent.replace(/\s+/g, ' ').slice(0, 120));
+  check('分别说清是哪一种',
+        /2 次校验没过/.test(el.textContent) && /1 次线索不足/.test(el.textContent));
+  check('报成需要留意而不是好消息',
+        el.querySelector('.note.warn') !== null && el.querySelector('.note.ok') === null);
+
+  //  只有一种的时候不能算出 NaN（另一个字段根本不存在）
+  renderStats(el, { ...base, repairs: 2 }, ['abandon']);
+  check('只有一种时数目仍然对', /被重写过/.test(el.textContent) && !/NaN/.test(el.textContent),
+        el.textContent.replace(/\s+/g, ' ').slice(0, 90));
+
+  renderStats(el, { ...base, repairs: 0, clue_fixes: 0 }, ['abandon']);
+  check('一次都没重写就不占地方', !/被重写过/.test(el.textContent));
+  renderStats(el, base, ['abandon']);
+  check('老文章没有这两个字段时不报', !/被重写过/.test(el.textContent));
+}
+
+/* -------- JSON 兜底层的仪表 --------
+   jsonfix 有五层兜底，一直没有任何仪表——第 1b 条那条「第 4 层一直在跑、
+   但一次都没成功过」是靠人工翻代码发现的。层名现在记进了 stats，
+   这里验最后一环：非顺风的层要报出来，而且**各报各的原因**——
+   截断是 max_tokens 不够，不合法是模型吐格式不稳，两件事不能合成一句。 */
+{
+  const ctx = boot('index');
+  const { renderStats } = await import(JS('components/stats.js'));
+  const el = q(ctx, '#stats');
+  const base = { targets_hit: 2, targets_total: 2, word_count: 200,
+                 sentence_count: 12, offender_rate: 0 };
+
+  renderStats(el, { ...base, json_layers: { direct: 6 } }, ['abandon']);
+  check('全是顺风就不占地方', !/不是原样就能解析/.test(el.textContent));
+
+  renderStats(el, { ...base, json_layers: { direct: 4, truncated: 2 } }, ['abandon']);
+  check('截断被报出来', /输出被截断/.test(el.textContent));
+  check('顺带说清该去查什么', /max_tokens/.test(el.textContent));
+  check('顺风的那一层不当成问题报', !/direct/.test(el.textContent));
+
+  renderStats(el, { ...base, json_layers: { fence: 1, repaired: 2 } }, ['abandon']);
+  check('两种毛病分开说',
+        /markdown 围栏/.test(el.textContent) && /JSON 本身不合法/.test(el.textContent));
+  check('次数加总对', /有 3 次不是原样就能解析/.test(el.textContent),
+        el.textContent.replace(/\s+/g, ' ').slice(0, 100));
+
+  renderStats(el, base, ['abandon']);
+  check('老文章没有 json_layers 时不报', !/不是原样就能解析/.test(el.textContent));
 }
 
 
@@ -515,6 +640,37 @@ console.log('\n9. 悬停浮层与专注模式');
   await settle(60);
   check('点按钮退出', !ctx.doc.body.classList.contains('focus-mode')
         && ctx.w.localStorage.getItem('wl-reader-focus') === '0');
+}
+
+/* ============================ hidden 真的藏得住吗 ============================
+
+   `hidden` 靠的是 UA 样式表里那条 `[hidden] { display: none }`，而**作者样式
+   无论特异性高低都盖过 UA 样式**。所以只要某个类写了 display（flex / grid /
+   inline-flex…），挂在它身上的 hidden 就当场失效——元素照常显示，而且点得动。
+
+   这条不属于 CLAUDE.md 说的「jsdom 测不了视觉」：它测的不是布局（jsdom 确实
+   没有布局引擎，offsetHeight 恒为 0），而是**层叠的结果**，getComputedStyle
+   在简单选择器上是准的。而 `el.hidden === true` 这种断言恰恰验不出它——
+   属性是 true，页面上却看得见。
+
+   本仓库已经为这条各打过四个补丁（.del-warn / .empty-state / .inline-new /
+   .typo-pop），第五处（.drill-judge）就是被这段测出来的：翻面前那两个判定
+   按钮一直摆在那儿，可以没看释义就按「认识」。所以不逐个点名，
+   整页扫一遍——以后再有人给某个 hidden 元素加 display，这里会先响。 */
+console.log('\n11. hidden 的元素真的藏起来了');
+{
+  const inlineCss = (html) => html.replace(
+    /<link rel="stylesheet" href="\/static\/css\/([^"]+)">/g,
+    (_, f) => `<style>${readFileSync(`./.fixtures/static/css/${f}`, 'utf8')}</style>`);
+
+  for (const page of ['index', 'library', 'words', 'settings', 'reader', 'study', 'drill']) {
+    const dom = new JSDOM(inlineCss(readFileSync(`./.fixtures/${page}.html`, 'utf8')),
+                          { url: 'http://127.0.0.1:8000/', pretendToBeVisual: true });
+    const leaked = [...dom.window.document.querySelectorAll('[hidden]')]
+      .filter((el) => dom.window.getComputedStyle(el).display !== 'none')
+      .map((el) => `${el.tagName.toLowerCase()}#${el.id || '?'}.${el.className}`);
+    check(`${page} 页没有「标了 hidden 却还显示」的元素`, leaked.length === 0, leaked.join(' '));
+  }
 }
 
 console.log(`\n${ok}/${ok + fail} 通过`);

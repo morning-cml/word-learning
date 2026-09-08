@@ -127,6 +127,52 @@ export function renderStats(el, s, targets, { onIgnore } = {}) {
     </div>`);
   }
 
+  // 这一篇重写过几次。**修复和补线索在顺风路径上一次都不发生**，发生了就说明
+  // 那一段没写对、花了第二次钱重写它——是「这一篇顺不顺」最直接的一个信号。
+  //
+  // 两个数一直算着也一直入库，却只在生成当时的时间线里露过面；从文库打开一篇
+  // 旧文章就看不到了，而那才是真要判断它值不值得读的时候
+  // （需要注意.md 第 12b 条：算出来了、但没在界面上编码，等于没算）。
+  //
+  // 只在非零时出现：顺风路径上多一行「重写 0 次」纯属噪声，而且会把
+  // 「这一篇很顺」这个信息稀释掉。老文章没这两个字段，同样什么都不显示。
+  const rework = [];
+  if (s.repairs) rework.push(`${s.repairs} 次校验没过`);
+  if (s.clue_fixes) rework.push(`${s.clue_fixes} 次线索不足`);
+  if (rework.length) {
+    blocks.push(`<div class="note warn" style="margin-top:10px">
+      这一篇有段落被重写过 <b>${(s.repairs || 0) + (s.clue_fixes || 0)}</b> 次（${rework.join(' + ')}）——
+      顺风路径上这两件事一次都不发生。<br>
+      <span class="hint">重写只可能让文章离原来的构思更远。同一批词换个题材再生成一篇，
+      通常比在这一篇上反复改有效。</span>
+    </div>`);
+  }
+
+  //  模型这一篇吐出来的 JSON，有几次不是原样就能解析的。
+  //
+  //  jsonfix 有五层兜底，而它们一直没有仪表——需要注意.md 第 1b 条记的
+  //  「第 4 层一直在跑、但一次都没成功过」是靠人工翻代码发现的。现在层名
+  //  记进了 stats，这里把非顺风的那几层报出来：它们各自指向一个不同的原因，
+  //  所以要分开说，不能合成一句「修复了 N 次」。
+  //
+  //  只在非 direct 的层响过时出现：顺风路径上这一行是纯噪声。
+  const LAYER_WHY = {
+    fence:     ['套了 markdown 围栏', '模型没按「不要围栏」那条走，兜底抠出来了'],
+    slice:     ['正文前后带了解释文字', '括号配对截取救回来的'],
+    truncated: ['输出被截断', '多半是 max_tokens 给少了——推理模型的思考也算在里面'],
+    repaired:  ['JSON 本身不合法', '靠语法修复救回来的；这个模型吐格式不太稳，可以去设置页跑一次四层检验'],
+  };
+  const layers = s.json_layers || {};
+  const rough = Object.entries(LAYER_WHY).filter(([k]) => layers[k]);
+  if (rough.length) {
+    const rows = rough.map(([k, [what, why]]) =>
+      `<li><b>${escapeHtml(what)}</b> ×${layers[k]}　<span class="hint">${escapeHtml(why)}</span></li>`).join('');
+    blocks.push(`<div class="note warn" style="margin-top:10px">
+      模型返回的 JSON 有 ${rough.reduce((n, [k]) => n + layers[k], 0)} 次不是原样就能解析的：
+      <ul style="margin:8px 0 0;padding-left:18px">${rows}</ul>
+    </div>`);
+  }
+
   // 学过的词在这篇里又出现了。这是好消息——多语境重复正是这个产品声称
   // 最有效的机制——可它以前完全不可见：要么被判成超纲列进「文中仍有超纲词」，
   // 要么被修复指令直接从文章里删掉。顺带它也是这条豁免的反馈回路：

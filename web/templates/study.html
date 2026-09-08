@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block body %}
+<main class="wrap">
+
+  <div class="page-head">
+    <h1>背单词</h1>
+    <p class="lede">
+      照着你手上那本书录进来：<b>书名、单元号、页号都由你填</b>，词的顺序就是你敲进去的顺序。
+      音标、释义、屈折和派生词由程序配上——你只用敲词形。
+    </p>
+  </div>
+
+  <div class="split">
+    <div class="split-main">
+
+      {# 录入卡放在最上面：这一页大部分时间是拿来录的，不是拿来看的 #}
+      <div class="card" id="entryCard">
+        <div class="card-head">
+          <h2>录一页</h2>
+          <span class="spacer"></span>
+          <span class="hint" id="dictNote"></span>
+        </div>
+
+        {# 三个字段并排，因为它们是一件事：定位到你书上的那一页。
+           新建走内联输入框而不是 prompt()——模态框会卡住整个页面，
+           而且这一页要连着录十几遍，每次弹一个框很烦。 #}
+        <div class="row">
+          <div class="grow">
+            <label class="field" for="bookSel">词书</label>
+            <div class="field-pick">
+              <select id="bookSel"></select>
+              <button class="btn-sm" id="newBook" type="button" title="新建词书">＋</button>
+            </div>
+          </div>
+          <div class="grow">
+            <label class="field" for="unitSel">单元</label>
+            <div class="field-pick">
+              <select id="unitSel"></select>
+              <button class="btn-sm" id="newUnit" type="button" title="新建单元">＋</button>
+            </div>
+          </div>
+          <div style="width:110px">
+            <label class="field" for="pageNo">页号</label>
+            <input type="text" id="pageNo" inputmode="numeric" placeholder="43">
+          </div>
+        </div>
+
+        <div class="inline-new" id="newBookRow" hidden>
+          <input type="text" id="newBookName" placeholder="和你手上那本一样的名字，比如「新东方六级词汇 乱序版」">
+          <button class="btn-sm btn-primary" id="newBookOk" type="button">建</button>
+          <button class="btn-sm" id="newBookCancel" type="button">取消</button>
+        </div>
+        <div class="inline-new" id="newUnitRow" hidden>
+          <input type="text" id="newUnitLabel" placeholder="单元号，比如「List 07」——程序会认出这是第 7 个">
+          <button class="btn-sm btn-primary" id="newUnitOk" type="button">建</button>
+          <button class="btn-sm" id="newUnitCancel" type="button">取消</button>
+        </div>
+
+        <div style="margin-top:var(--sp-4)">
+          <label class="field" for="paste">
+            这一页的单词（一行一个；带音标释义的整行也认，只取头一个词）
+          </label>
+          <textarea id="paste" spellcheck="false"
+                    placeholder="abandon&#10;abbreviation&#10;abdomen&#10;abide"></textarea>
+          <div class="hint" id="pastePreview"></div>
+        </div>
+
+        <div class="row form-actions">
+          <label class="inline-check" title="重贴同一页用。已经背出来的进度会按词形接回去">
+            <input type="checkbox" id="replacePage"> 替换这一页
+          </label>
+          <span class="spacer"></span>
+          <button class="btn-primary" id="addEntries" type="button">加入这一页</button>
+        </div>
+      </div>
+
+      {# 录完要能立刻对着书核一遍顺序，这是「和纸质版一致」唯一的验收手段 #}
+      <div class="card" id="unitsCard" hidden>
+        <div class="card-head">
+          <h2>单元</h2>
+          <span class="spacer"></span>
+          <span class="hint">点开对着书核一遍顺序</span>
+          {# 「和纸质版一致」这条承诺，在界面上只能一行行翻着验。导成一张表
+             才拿得到手上，对着书扫一眼就知道对不对。href 由 study.js 跟着
+             当前选中的词书改。 #}
+          <a class="btn btn-sm" id="exportBook" href="#" download
+             title="按书上的顺序导出这本词书（CSV）">导出这本</a>
+        </div>
+        <div class="unit-grid" id="units"></div>
+      </div>
+
+      <div class="empty-state" id="empty" hidden>
+        {% include "_mark.html" %}
+        <h3>还没有词书</h3>
+        <p>新建一本，填上和你书架上那本一样的名字；
+           然后翻到某一页，把那一页的单词敲进去。<br>
+           顺序、单元号、页号都以你录的为准，程序不替你排。</p>
+      </div>
+
+    </div>
+
+    <aside class="split-side">
+
+      <div class="card">
+        <div class="section-title">怎么用</div>
+        <ol class="flow">
+          <li><b>建一本词书</b><span>名字随你写，和手上那本对得上就行</span></li>
+          <li><b>建一个单元</b><span>「List 07」这样写，程序会认出这是第 7 个</span></li>
+          <li><b>一页一页录</b><span>填页号、敲词形，其余自动配上</span></li>
+          <li class="key"><b>核一遍顺序</b><span>点开单元对着书看一眼——顺序是这个功能唯一要保证的东西</span></li>
+        </ol>
+      </div>
+
+      <div class="card" id="dictCard">
+        <div class="section-title">词典</div>
+        <div id="dictInfo"></div>
+      </div>
+
+    </aside>
+  </div>
+
+</main>
+{% endblock %}

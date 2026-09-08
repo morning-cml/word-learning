@@ -461,6 +461,84 @@ def studied_lemmas(s: Session) -> set[str]:
     return {lemma for lemma in s.scalars(select(Word.lemma)) if lemma}
 
 
+def reading_history(s: Session, days: int = 90, tz=None) -> dict:
+    """按天汇总「读了多少词」，外加连续天数。
+
+    为什么值得有：这个应用的价值主张是「累计语境是一次次读攒出来的」，
+    而界面上只有三个快照数（累计词条 / 多语境 / 只见过一次）——**看不出它在长**。
+    时间维度所需的数据早就入库了（Article.created_at + stats.word_count），
+    零 schema 改动。
+
+    **按天分组必须用本地时间。** created_at 存的是 UTC（utcnow()），而 SQLite
+    的 DateTime 列不保留 tzinfo，读出来是 naive 的。直接 .date() 就是按 UTC
+    切天——东八区凌晨读的那篇会算到前一天去，「连续几天」跟着断。
+    这就是 as_utc 上面那段说的同一个坑（需要注意.md 第 12d 条），只不过那次
+    是差 8 小时，这次是差一整天、还会把 streak 归零。
+    单机自用，服务端的本地时区就是用户的时区，所以默认在这里转完再分组。
+    tz 可以传进来只为一件事：**让这条能被测到**。不给的话测试只能拿本机时区
+    去验本机时区，在 UTC 上跑（CI 就是）就永远是空跑——而这正是它最该被验的
+    那种机器（需要注意.md 第 17 条：因为你碰巧在东八区所以过，不算过）。
+
+    word_count 存在 stats 这个 JSON 里，**老文章可能没有**——那时候还没记。
+    缺的算 0，但单独报一个 missing_word_count 出去，让界面能如实说
+    「早期几篇没有字数记录」，而不是画出一条从零开始的假曲线。
+    """
+    from datetime import timedelta
+
+    today = utcnow().astimezone(tz).date()
+    earliest = today - timedelta(days=days - 1)
+
+    per_day: dict[str, dict] = {}
+    missing = 0
+    for art in s.scalars(select(Article).order_by(Article.created_at)):
+        when = as_utc(art.created_at)
+        if when is None:
+            continue
+        day = when.astimezone(tz).date()        # UTC -> 目标时区，再切天
+        words = int((art.stats or {}).get("word_count") or 0)
+        if not words:
+            missing += 1
+        if day < earliest:
+            continue
+        row = per_day.setdefault(day.isoformat(), {"date": day.isoformat(),
+                                                   "words": 0, "articles": 0})
+        row["words"] += words
+        row["articles"] += 1
+
+    days_list = [per_day[k] for k in sorted(per_day)]
+    running = 0
+    for row in days_list:
+        running += row["words"]
+        row["total"] = running
+
+    return {
+        "days": days_list,
+        "streak": _reading_streak(set(per_day), tz),
+        "total_words": running,
+        "total_articles": sum(r["articles"] for r in days_list),
+        "missing_word_count": missing,
+    }
+
+
+def _reading_streak(dates: set[str], tz=None) -> int:
+    """连续读到今天为止有多少天。今天还没读的话，从昨天往回数。
+
+    不从今天算起就归零的话，早上打开应用看到的永远是 0——而昨天明明读了。
+    Lute 的 get_reading_streak 也是这么处理边界的。
+    """
+    from datetime import timedelta
+
+    if not dates:
+        return 0
+    today = utcnow().astimezone(tz).date()
+    cursor = today if today.isoformat() in dates else today - timedelta(days=1)
+    streak = 0
+    while cursor.isoformat() in dates:
+        streak += 1
+        cursor -= timedelta(days=1)
+    return streak
+
+
 def word_stats(s: Session) -> dict:
     words = list(s.scalars(select(Word)))
     return {

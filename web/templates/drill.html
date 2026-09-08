@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block head %}<link rel="stylesheet" href="/static/css/reader.css">{% endblock %}
+{% block body_data %} data-unit-id="{{ params.unit_id }}"{% endblock %}
+
+{% block body %}
+<div class="reader-bar">
+  <a class="btn-sm" href="/study">← 词书</a>
+  <span class="drill-where" id="where"></span>
+
+  <div class="segmented" id="views">
+    <button type="button" data-view="card" class="on">卡片</button>
+    <button type="button" data-view="list">词表</button>
+  </div>
+
+  {# 按页过滤：对着书核顺序时要能只看某一页 #}
+  <select id="pageFilter" class="drill-pages"></select>
+
+  <span class="spacer"></span>
+  <span class="drill-progress" id="progress"></span>
+</div>
+
+<main class="drill-body">
+
+  {# ---- 卡片视图 ---- #}
+  <section id="cardView">
+    <div class="drill-card" id="card" hidden>
+      <div class="drill-face">
+        <div class="drill-word" id="word"></div>
+        <div class="drill-phonetic" id="phonetic"></div>
+        <div class="drill-page" id="cardPage"></div>
+      </div>
+
+      <div class="drill-back" id="back" hidden>
+        <div class="drill-translation" id="translation"></div>
+        <div class="drill-forms" id="forms"></div>
+        <div class="drill-note" id="note"></div>
+        {# 这个词在生成的文章里读到过没有——背单词和读文章是同一份学习状态，
+           点开就是词库那个面板。这一条是两个功能之间唯一的连接，也是这个
+           应用和「一个背单词 App」的区别所在。 #}
+        <div class="drill-seen" id="seen" hidden></div>
+      </div>
+
+      <div class="drill-actions" id="actions">
+        <button class="btn-primary drill-flip" id="flip" type="button">看释义（空格）</button>
+        <div class="drill-judge" id="judge" hidden>
+          <button class="btn-danger" id="no" type="button">不认识（←）</button>
+          <button class="btn-primary" id="yes" type="button">认识（→）</button>
+        </div>
+      </div>
+    </div>
+
+    {# 标题和说明都由 drill.js 填：「今天该复习的过完了」和「这一单元过完了」
+       是两件完全不同的事，写死一句话会把前者说成后者。 #}
+    <div class="empty-state" id="done" hidden>
+      {% include "_mark.html" %}
+      <h3 id="doneTitle">这一轮过完了</h3>
+      <p id="doneNote"></p>
+      <button class="btn btn-primary" id="again" type="button">再过一遍</button>
+    </div>
+  </section>
+
+  {# ---- 词表视图：对着书核顺序用 ---- #}
+  <section id="listView" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2>按书上的顺序</h2>
+        <span class="spacer"></span>
+        <span class="hint">序号就是书上的顺序 · 点一行改释义或写笔记</span>
+      </div>
+      <div class="table-scroll">
+        <table class="table" id="entryTable">
+          <thead>
+            <tr><th>#</th><th>页</th><th>词</th><th>音标</th><th>释义</th><th>掌握</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<aside class="panel" id="panel"></aside>
+{% endblock %}

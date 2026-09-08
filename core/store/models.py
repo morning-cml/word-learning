@@ -49,13 +49,23 @@ class Base(DeclarativeBase):
 
 
 # 词汇状态沿用 Lute 的分档：1-5 学习中，98 已掌握，99 忽略（专有名词等）
+#
+# 0 是背单词页加的：那一页里「这个词还没轮到我背」和「背过一次、刚认识」
+# 是两件事，而原来的分档最低就是 1，两者只能挤在一起——单元进度会从一开始
+# 就显示成 100% 在学。Lute 自己也用 0 表示「人从没碰过」（见 studied_lemmas
+# 那段注释），所以这不是新造一档，是把它那一档补回来。
+# Word 行不会以 0 存在（进词库本身就说明碰过了），它只用在 BookEntry 上。
+STATUS_NEW = 0
 STATUS_LEARNING = 1
 STATUS_KNOWN = 98
 STATUS_IGNORED = 99
 STATUS_LABELS = {
+    0: "未学",
     1: "刚认识", 2: "有印象", 3: "较熟", 4: "很熟", 5: "接近掌握",
     98: "已掌握", 99: "忽略",
 }
+# 学习中的那一段，背单词页推进掌握程度时要知道边界在哪
+STATUS_LEARNING_MAX = 5
 
 
 class Word(Base):
@@ -175,3 +185,128 @@ class Encounter(Base):
 
     word: Mapped[Word] = relationship(back_populates="encounters")
     sentence: Mapped[Sentence] = relationship(back_populates="encounters")
+
+
+# ---------------------------------------------------------------------------
+# 词书：照着一本纸质书录进来的顺序
+#
+# 三层 词书 / 单元 / 词条，对应纸质书的 书 / List / 页上的一行。分成三层不是
+# 为了整齐，是因为**用户要能分别控制这三个名字**：书名、单元号、页号，
+# 三者凑齐才对得上他手里那一本。
+#
+# 顺序是这几张表存在的**全部理由**：`BookUnit.idx` 和 `BookEntry.idx` 是录入
+# 时的位置，任何查询都必须按它排。一处按别的字段排（字母序、词频、id），
+# 「和纸质版一致」这条就断了，而且断得很安静——用户翻到第 42 页对不上，
+# 多半只会以为自己录错了。
+#
+# **这几张表装的是不可再生的东西。** 词典能重新生成（跑一次
+# scripts/build_wordbook_dict.py），顺序不能——那是人对着书一页页敲进去的。
+# 所以它们和 Word / Encounter 一样受 data/backups/ 的启动快照保护。
+#
+# 留给以后的扩展：
+#   · 释义等字段是**录入当时的快照**而不是每次现查词典，所以用户可以改它
+#     （书上的释义和字典不一样时以书为准），重新生成词典也不会把他改的冲掉；
+#   · dict_extra 是 JSON，词典以后多给几个字段（词根、例句、音频）不用改表结构；
+#   · 复习记录目前压成 right / wrong / last_reviewed_at 三个数。要做遗忘曲线时
+#     再加 due_at / interval 两列即可（_migrate 会自动补列）；真要逐次留痕
+#     就单开一张 review 表，record_review 是唯一的写入口，改一处就够。
+# ---------------------------------------------------------------------------
+
+
+class WordBook(Base):
+    """一本词书。名字由用户自己填，要和他书架上那本对得上。"""
+
+    __tablename__ = "wordbooks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    # 版次 / ISBN / 「乱序版」这类，用户自己写，程序不解释
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 这本书是怎么来的。现在只有 manual（手敲），留着是因为以后一定会有
+    # 别的来路（导入文件、从文章生成的生词表反建一本），到时候要分得开。
+    source: Mapped[str] = mapped_column(String(20), default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    units: Mapped[list["BookUnit"]] = relationship(
+        back_populates="book", cascade="all, delete-orphan", order_by="BookUnit.idx"
+    )
+
+
+class BookUnit(Base):
+    """书里的一个单元（List / Unit / 第几课）。"""
+
+    __tablename__ = "book_units"
+    __table_args__ = (UniqueConstraint("book_id", "label", name="uq_unit_label"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    book_id: Mapped[int] = mapped_column(
+        ForeignKey("wordbooks.id", ondelete="CASCADE"), index=True
+    )
+    # 书里的第几个单元。**排序只认它**，不认 id——用户可能先录 List 7 再补 List 3。
+    idx: Mapped[int] = mapped_column(Integer, default=0)
+    # 单元号原样存字符串而不是整数："List 07"、"Unit 3-A"、"核心词 Ⅱ" 都得放得下。
+    # 存成整数就等于替用户规定他的书该怎么编号。
+    label: Mapped[str] = mapped_column(String(60), default="")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    book: Mapped[WordBook] = relationship(back_populates="units")
+    entries: Mapped[list["BookEntry"]] = relationship(
+        back_populates="unit", cascade="all, delete-orphan", order_by="BookEntry.idx"
+    )
+
+
+class BookEntry(Base):
+    """书上的一个词：它在第几页、单元里排第几，以及背到什么程度。"""
+
+    __tablename__ = "book_entries"
+    __table_args__ = (Index("ix_entry_unit_pos", "unit_id", "idx"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    unit_id: Mapped[int] = mapped_column(
+        ForeignKey("book_units.id", ondelete="CASCADE"), index=True
+    )
+    # 单元内的顺序 = 录入顺序 = 书上的顺序。见上面那段。
+    idx: Mapped[int] = mapped_column(Integer, default=0)
+    # 页码。允许为空：有人只按 List 录，不关心页。
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
+    # 用户敲进来的词形，**原样保留**。字典命中的原形另存在 lemma 里——
+    # 书上印的是 abandoned 时，卡片正面要显示 abandoned，不是 abandon。
+    headword: Mapped[str] = mapped_column(String(80), index=True)
+    lemma: Mapped[str] = mapped_column(String(80), default="", index=True)
+
+    # 以下是录入当时从词典抄来的快照，用户可以改（见上面「留给以后的扩展」）
+    phonetic: Mapped[str] = mapped_column(String(120), default="")
+    translation: Mapped[str] = mapped_column(Text, default="")
+    inflections: Mapped[list] = mapped_column(JSON, default=list)
+    derivatives: Mapped[list] = mapped_column(JSON, default=list)
+    # 词典以后多给什么就往这里放，不用动表结构
+    dict_extra: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 用户自己写的：书上的词根拆解、联想、例句——那些东西只在他的书里，
+    # 程序不去别处抓，留个地方让他填。
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # 进度。用的是全应用同一套分档（STATUS_LABELS），这样词库页和背单词页
+    # 说的是同一种话，不用在两处各造一套「熟练度」。
+    status: Mapped[int] = mapped_column(Integer, default=STATUS_NEW, index=True)
+    right: Mapped[int] = mapped_column(Integer, default=0)
+    wrong: Mapped[int] = mapped_column(Integer, default=0)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # ---- 间隔重复（FSRS）------------------------------------------------
+    # 上面那句「要做遗忘曲线时再加 due_at / interval 两列」兑现在这里。
+    #
+    # due_at 单独出来一列而不是塞进 fsrs 这个 JSON 里：**要按它筛**（今天该复习
+    # 哪些），JSON 里的字段查不了也建不了索引。fsrs 里装的是调度器自己的状态
+    # （stability / difficulty / state / step），这一层不解释它，原样存原样取——
+    # 换算法或者升级库时不用动表结构。
+    #
+    # 两列都可空，而且**为空就是「还没进过调度」**：老库补列时是 NULL，
+    # 没装 fsrs 的机器上也一直是 NULL。这两种情况下背诵页退回原来的行为
+    # （按书序过一遍所有没背熟的），不报错也不丢东西。
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    fsrs: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    unit: Mapped[BookUnit] = relationship(back_populates="entries")

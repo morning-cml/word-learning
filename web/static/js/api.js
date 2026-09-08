@@ -47,9 +47,10 @@ async function request(method, path, body) {
   return res.json();
 }
 
-export const get  = (path)       => request('GET', path);
-export const post = (path, body) => request('POST', path, body ?? {});
-export const del  = (path)       => request('DELETE', path);
+export const get   = (path)       => request('GET', path);
+export const post  = (path, body) => request('POST', path, body ?? {});
+export const patch = (path, body) => request('PATCH', path, body ?? {});
+export const del   = (path)       => request('DELETE', path);
 
 /** 包一层：失败时弹 toast 并返回 fallback，用于「失败了也不该中断页面」的场景。 */
 export async function tryGet(path, fallback = null) {
@@ -68,6 +69,9 @@ export const status = () => get('/api/status');
 export const levels = () => get('/api/levels');
 export const timing = () => get('/api/timing');
 
+/** 按天的阅读量 + 连续天数。文库页拿它画走势。 */
+export const readingHistory = (days) => get(`/api/reading/history?days=${days || 56}`);
+
 export const article = {
   preview:  (words)        => post('/api/article/plan-preview', { words }),
   list:     ()             => get('/api/articles'),
@@ -84,6 +88,34 @@ export const words = {
   ignore:    (lemma)        => post('/api/words', { lemma, status: 99 }),
   detail:    (lemma)        => get(`/api/words/${encodeURIComponent(lemma)}`),
   setStatus: (lemma, value) => post(`/api/words/${encodeURIComponent(lemma)}/status`, { status: value }),
+};
+
+/* 词书。按资源分层，和后端路由一一对应——页面会改，资源不会，
+   以后加测验 / 导出 / 遗忘曲线都是在这几层下面挂新动作，不用回来重排。 */
+export const wordbook = {
+  status:      ()                 => get('/api/wordbook/status'),
+  preview:     (text)             => get(`/api/wordbook/preview?text=${encodeURIComponent(text)}`),
+
+  books:       ()                 => get('/api/wordbook/books'),
+  createBook:  (name, note)       => post('/api/wordbook/books', { name, note }),
+  updateBook:  (id, body)         => patch(`/api/wordbook/books/${id}`, body),
+  bookImpact:  (id)               => get(`/api/wordbook/books/${id}/impact`),
+  removeBook:  (id)               => del(`/api/wordbook/books/${id}`),
+
+  units:       (bookId)           => get(`/api/wordbook/books/${bookId}/units`),
+  createUnit:  (bookId, label)    => post(`/api/wordbook/books/${bookId}/units`, { label }),
+  updateUnit:  (id, body)         => patch(`/api/wordbook/units/${id}`, body),
+  removeUnit:  (id)               => del(`/api/wordbook/units/${id}`),
+
+  entries:     (unitId, page)     => get(`/api/wordbook/units/${unitId}/entries`
+                                         + (page == null ? '' : `?page=${page}`)),
+  addEntries:  (unitId, body)     => post(`/api/wordbook/units/${unitId}/entries`, body),
+  updateEntry: (id, body)         => patch(`/api/wordbook/entries/${id}`, body),
+  removeEntry: (id)               => del(`/api/wordbook/entries/${id}`),
+  // 只说「认不认识」，不说该推到哪一档——档位规则归后端，
+  // 以后换成遗忘曲线时这一行不用动
+  review:      (id, known, mode)  => post(`/api/wordbook/entries/${id}/review`,
+                                          { known, mode: mode || 'flip' }),
 };
 
 export const settings = {

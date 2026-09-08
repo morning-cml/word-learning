@@ -158,30 +158,52 @@ def _hollow(value: Any) -> bool:
     return value is None
 
 
-def loads(text: str) -> Any:
-    """尽最大努力把模型输出解析成 Python 对象。"""
+# 每一层的名字。这几个字符串是**层的身份**，会被计数、进 stats、上界面，
+# 所以只在这里定义一次；显示成什么中文归前端（和 clue_strength 的
+# strong/weak/none 一个分工）。
+LAYER_DIRECT = "direct"        # 第 1 层：原样解析（顺风路径）
+LAYER_FENCE = "fence"          # 第 2 层：抠 code fence
+LAYER_SLICE = "slice"          # 第 3 层：括号配对截取
+LAYER_TRUNCATED = "truncated"  # 第 4 层：截断补齐
+LAYER_REPAIRED = "repaired"    # 第 5 层：json_repair 整段语法修复
+
+
+def loads_reported(text: str) -> tuple[Any, str]:
+    """解析，并说清是**第几层**修好的。返回 (值, 层名)。
+
+    为什么要报这个：这个模块有五层兜底，而它们一直没有任何仪表。
+    需要注意.md 第 1b 条记的就是这件事——第 4 层曾经「一直在跑、但一次都没
+    成功过」，而那是靠人工翻代码才发现的，不是被任何东西报出来的。
+
+    一层兜底能不能用，只有跑起来才知道；而一层兜底**没被用到过**和
+    **每次都被用到**是两个完全不同的信号：
+      · 第 4 层常响 -> max_tokens 给少了，正文被截断；
+      · 第 5 层常响 -> 这个模型吐不出合法 JSON，该去设置页跑四层检验；
+      · 全是第 1 层 -> 顺风，这几层是白养的保险。
+    把层名记进 stats，这三件事就都变成了一个每次生成都在报的数字——
+    和 clue_strength 是同一套「错了会响」的论证。
+    """
     if not text or not text.strip():
         raise JsonParseError("模型返回了空内容", text or "")
 
-    candidates: list[str] = []
-    stripped = text.strip()
-    candidates.append(stripped)
+    # (层名, 候选文本)。第 1 层是原样，后面几层各自换一种取法。
+    candidates: list[tuple[str, str]] = [(LAYER_DIRECT, text.strip())]
 
     for m in _FENCE.finditer(text):          # 第 2 层：抠 code fence
-        candidates.append(m.group(1).strip())
+        candidates.append((LAYER_FENCE, m.group(1).strip()))
 
     sliced = _balanced_slice(text)            # 第 3 层：括号配对截取
     if sliced:
-        candidates.append(sliced)
+        candidates.append((LAYER_SLICE, sliced))
 
-    for cand in candidates:
+    for layer, cand in candidates:
         for attempt in (cand, _TRAILING_COMMA.sub(r"\1", cand)):
             try:
-                return json.loads(attempt)
+                return json.loads(attempt), layer
             except json.JSONDecodeError:
                 continue
 
-    for cand in candidates:                   # 第 4 层：截断补齐
+    for _layer, cand in candidates:           # 第 4 层：截断补齐
         for patched in _repair_truncated(cand):
             for attempt in (patched, _TRAILING_COMMA.sub(r"\1", patched)):
                 try:
@@ -190,7 +212,7 @@ def loads(text: str) -> Any:
                     continue
                 # 补出来是个空壳就不算救回来，换下一个候选（见 _hollow）
                 if not _hollow(got):
-                    return got
+                    return got, LAYER_TRUNCATED
 
     # 第 5 层：整段语法修复。json_repair 是个按 JSON 文法走的解析器，
     # 能修上面四层修不了的一类东西——它们都在真实输出里出现过：
@@ -210,7 +232,7 @@ def loads(text: str) -> Any:
     # 没装也能跑：这一层是加分项，缺了只是少修几种畸形，和 CEFR 词表缺失时
     # 退回内置兜底表是同一个处理方式。
     if _json_repair is not None:
-        for cand in candidates:
+        for _layer, cand in candidates:
             # 截断的候选不交给它。json_repair 修截断的办法是**补默认值**，
             # 实测 `{"sentences": [{"e` 会被补成 `{"sentences": [["e"]]}`——
             # 把半个键名编成了一个值。本模块第 4 层只丢不补，宁可少一句，
@@ -227,6 +249,15 @@ def loads(text: str) -> Any:
             # 悄悄变成「成功解析出一个空文档」，那正是这个项目最不能接受的
             # 那种失败（见 需要注意.md 第 2 条）。走到这一层还是空，就报错。
             if got not in ("", None, [], {}):
-                return got
+                return got, LAYER_REPAIRED
 
     raise JsonParseError("无法从模型输出中解析出 JSON", text[:1000])
+
+
+def loads(text: str) -> Any:
+    """尽最大努力把模型输出解析成 Python 对象。
+
+    不关心是第几层修好的就用这个。要那个信号走 loads_reported()——
+    调用链上只有 client.py 需要它（它要把层名累进 Usage）。
+    """
+    return loads_reported(text)[0]

@@ -164,10 +164,20 @@ def cefr_table(monkeypatch):
     （真词表里这样的组合有 983 对，其中 496 对更难）。
     直接依赖 data/cefr.csv 的话，这类测试在没下载词表的机器上（CI 就是）
     会因为退回内置兜底表而悄悄走到另一条分支上——看着过了，其实没测到。
+
+    **词频回落也要一起换掉。** 标尺现在有两个数据源：CEFR-J 查不到时回落到
+    ECDICT 的词频（见 cefr.FREQ_CUTOFFS）。只换前一个的话，这张小表之外的词
+    会静静地去查那 30713 条真词频表——测试写着「词表里只有这两个词」，
+    实际判定却由仓库里另一份数据决定，等于隔离没做全
+    （需要注意.md 第 17c 条：隔离的范围要跟着状态走）。
+
+    默认把词频表清空（= 词典缺失时的降级路径），要测回落的测试自己传
+    `freq={...}` 进来。
     """
     from core.lexicon import cefr
 
-    def apply(table: dict[str, str]) -> None:
+    def apply(table: dict[str, str], freq: dict[str, int] | None = None) -> None:
         monkeypatch.setattr(cefr, "_load", lambda: (dict(table), True))
+        monkeypatch.setattr(cefr, "_freq_table", lambda: dict(freq or {}))
 
     return apply

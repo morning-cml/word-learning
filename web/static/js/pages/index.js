@@ -348,14 +348,43 @@ async function loadLevels(levelEl) {
   // 四行既是说明也是控件，和下拉框双向同步
   const sync = () => [...box.children].forEach(
     (li) => li.classList.toggle('on', li.dataset.level === levelEl.value));
+
+  /*  这一档要记住。settings.local.json 里一直存着 level，`/api/settings` 会校验它、
+      `/api/status` 会回它、生成接口也拿它当兜底——**只有这个下拉框不读也不写**，
+      于是每次刷新都从模板里那个 selected="B2" 重新开始。选了 B1 生成一篇，
+      回来接着生成第二篇，标尺已经悄悄换回 B2 了，而这一档决定的正是「除目标词
+      以外能用多难的词」，也就是语境线索推不推得出来。
+      改错了没人看得出来（能判断用词超没超 B2 的人本来就不需要这个功能），
+      所以它属于这个项目最该避免的那类失败。 */
+  let touched = false;           // 用户自己动过了没有，见下面恢复那一段
+  const persist = () => {
+    touched = true;
+    return api.settings.save({ level: levelEl.value })
+      .catch((err) => toast('用词上限没能存下来：' + err.message, 'bad'));
+  };
+
   box.addEventListener('click', (e) => {
     const li = e.target.closest('li[data-level]');
     if (!li) return;
     levelEl.value = li.dataset.level;
     sync();
+    persist();                   // 程序改 .value 不会触发 change，这里得自己存
   });
-  levelEl.addEventListener('change', sync);
+  levelEl.addEventListener('change', () => { sync(); persist(); });
   sync();
+
+  //  恢复上次选的那一档。两条约束：
+  //  · 只认下拉框里真有的选项——settings 允许 A1-C2 六档，而这一页只列了四档，
+  //    赋一个不存在的值会把 .value 变成空串，四行全不高亮、下拉框也一片空白；
+  //  · 用户已经动过就不覆盖。这几十毫秒里他完全可能已经点了一档，
+  //    而「点完之后自己跳回去」比不恢复更糟——他会以为这个控件是坏的。
+  try {
+    const saved = (await api.status()).level;
+    if (!touched && saved && [...levelEl.options].some((o) => o.value === saved)) {
+      levelEl.value = saved;
+      sync();
+    }
+  } catch (err) { /* 拿不到就用模板里的默认档，不影响这次生成 */ }
 
   let info;
   try {

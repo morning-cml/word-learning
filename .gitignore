@@ -12,6 +12,11 @@ data/backups/
 data/*.csv
 !data/.gitkeep
 
+# 背单词词典的**构建中间产物**（ECDICT 原始表，66MB）。
+# 生成物 data/wordbook/dict.csv 是要提交的——它让「双击 run.bat 就能用」
+# 这条承诺在背单词页上也成立，不必联网再下一次。
+data/wordbook/ecdict.csv
+
 # 崩溃时写的运行时产物，含完整堆栈
 data/last-error.log
 

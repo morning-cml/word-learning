@@ -32,6 +32,7 @@ from core.version import VERSION
 from web import pages
 from web.routes.article_api import router as article_router
 from web.routes.settings_api import router as settings_router
+from web.routes.wordbook_api import router as wordbook_router
 
 ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(ROOT / "web" / "templates"))
@@ -59,6 +60,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost
 app.mount("/static", StaticFiles(directory=str(ROOT / "web" / "static")), name="static")
 app.include_router(settings_router)
 app.include_router(article_router)
+app.include_router(wordbook_router)
 # 页面路由由 web/pages.py 的注册表生成，加页面不用回来改这里
 pages.register(app, templates)
 
