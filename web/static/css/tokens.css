@@ -238,11 +238,7 @@
     --sunk: inset 0 1px 3px rgba(0, 0, 0, .34);
     --rule: rgba(214, 186, 150, .1);
     --stitch: rgba(214, 186, 150, .18);
-    --shadow-4: 0 4px 10px rgba(0, 0, 0, .34),
-        0 18px 40px rgba(0, 0, 0, .42),
-        0 40px 80px rgba(0, 0, 0, .4);
-  --sunk: inset 0 1px 3px rgba(0, 0, 0, .34);
-  --edge: inset 0 1px 0 rgba(255, 238, 214, .07);
+    --edge: inset 0 1px 0 rgba(255, 238, 214, .07);
     /* 深色下噪声要靠提亮而不是压暗，multiply 在黑底上等于没有 */
     --grain-blend: overlay;
     --grain-strength: .05;

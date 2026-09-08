@@ -106,6 +106,20 @@ check('切碎的 SSE 分片被正确拼回', text.includes('The Wrong Number'));
 check('选题理由显示', text.includes('这批词有共同的情绪场'));
 check('重试被标红', [...doc.querySelectorAll('#timeline .step.bad')].some(s => s.textContent.includes('重试')));
 check('修复步骤可见', text.includes('第 1 次修复'));
+//  修复和补线索在顺风路径上一次都不出现，出现了就是在花第二次钱重写这一段。
+//  原先这里算出了 warn 却把空串传了下去，于是它和「第 N 段完成」长得一模一样，
+//  扫一眼看不出这一篇顺不顺（需要注意.md 第 12c 条的又一例）。
+const repairStep = [...doc.querySelectorAll('#timeline .step')]
+  .find((s) => s.textContent.includes('第 1 次修复'));
+check('修复这一步标成 warn', repairStep?.classList.contains('warn') === true,
+      repairStep?.className);
+//  颜色不能是唯一的通道（第 12b 条），记号也要跟着换
+check('修复这一步的记号不是普通的那个', repairStep?.querySelector('.dot').textContent === '↻',
+      repairStep?.querySelector('.dot').textContent);
+check('正常步骤不带 warn',
+      [...doc.querySelectorAll('#timeline .step.warn')]
+        .every((s) => /修复|补线索/.test(s.textContent)),
+      [...doc.querySelectorAll('#timeline .step.warn')].map((s) => s.textContent).join(' | '));
 check('逐段线索结论显示', text.includes('abandon=strong') && text.includes('confess=weak'));
 //  补线索两轮都没救回来的那一段要看得出来。这个判断原先算了却没接上
 //  （三元两个分支都返回空串），于是它和一段全 strong 的长得一模一样
@@ -178,6 +192,83 @@ console.log('\n进度条的算术');
         !/预计还需/.test(globalThis.__e.textContent), globalThis.__e.textContent);
 
   Date.now = realNow;
+}
+
+/* ---- 点了停止之后，进度条不能继续装作在跑 ----
+
+   这条盯的是一个只有「跑完整条路」才看得见的洞：管线**有**一个 cancelled 事件，
+   而它在这条传输上永远到不了——后端的取消标志是由 SSE 流的收尾逻辑置位的，
+   那一刻客户端已经断开，队列里的 cancelled 没人再读。于是「停止时把进度条停掉」
+   这件事只写在那个收不到的事件处理器里，等于没写：条子冻在原地，
+   旁边还留着「正在写正文（第 1/2 段）」和「预计还需 3 分」，
+   外加那道「我还活着」的流光——用户刚按了停止，界面却在说它还在跑。
+
+   单测 Progress 抓不到它（Progress.stop 本身是对的，是没人调）。
+   必须真的点一次 #go、再点一次 #stop。 */
+{
+  console.log('\n停止');
+  const dom2 = new JSDOM(readFileSync('./.fixtures/index.html', 'utf8'),
+                         { url: 'http://127.0.0.1:8000/', pretendToBeVisual: true });
+  const w2 = dom2.window, doc2 = w2.document;
+  for (const k of ['window','document','localStorage','matchMedia','requestAnimationFrame',
+                   'Node','Element','HTMLElement','KeyboardEvent','MouseEvent','Event','TextDecoder'])
+    { if (w2[k] !== undefined) { try { globalThis[k] = w2[k]; } catch (e) {} } }
+  w2.HTMLElement.prototype.scrollIntoView = () => {};
+
+  //  前几个事件照常发，之后**永远不返回**——模拟一次还在飞的模型调用。
+  //  真实情况就是这样：正在飞的那次掐不断，abort 只能让 reader.read() 抛出来。
+  const HEAD = [
+    { type:'phase', phase:'plan', message:'正在为 2 个词选题，规划 2 段' },
+    { type:'call', purpose:'structured', attempt:1 },
+    { type:'phase', phase:'write', index:1, total:2, message:'第 1/2 段：abandon' },
+    { type:'call', purpose:'creative', attempt:1 },
+  ];
+  globalThis.fetch = w2.fetch = async (url, opts = {}) => {
+    const p = String(url);
+    if (p === '/api/article/plan-preview')
+      return { ok:true, status:200, json: async () => ({
+        words:['abandon','silence'], count:2, paragraphs:2, estimated_words:170, warning:'' }) };
+    if (p === '/api/timing')
+      return { ok:true, status:200, json: async () => ({ samples:3, sec_per_call:36.1, scope:'model' }) };
+    if (p === '/api/article/generate') {
+      const enc = new TextEncoder();
+      let i = 0;
+      return { ok:true, status:200, body: { getReader: () => ({
+        read: () => new Promise((res, rej) => {
+          if (i < HEAD.length) {
+            const e = HEAD[i++];
+            setTimeout(() => res({ done:false, value: enc.encode(`data: ${JSON.stringify(e)}\n\n`) }), 5);
+            return;
+          }
+          opts.signal.addEventListener('abort', () => {
+            const err = new Error('aborted'); err.name = 'AbortError'; rej(err);
+          });
+        }),
+      }) } };
+    }
+    return { ok:true, status:200, json: async () => ({}) };
+  };
+
+  //  换个 URL 才拿得到一份新的模块实例（旧那份的监听器挂在上一个 document 上）
+  const mod2 = await import(pathToFileURL('./.fixtures/static/js/pages/index.js').href + '?stop');
+  await mod2.init({});
+  doc2.querySelector('#words').value = 'abandon silence';
+  doc2.querySelector('#go').dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));
+  await new Promise(r => setTimeout(r, 250));
+  check('停止之前条子在跑', /正在写正文/.test(doc2.querySelector('#progressStage').textContent),
+        doc2.querySelector('#progressStage').textContent);
+
+  doc2.querySelector('#stop').dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));
+  await new Promise(r => setTimeout(r, 400));
+  check('停止后阶段文字改口', doc2.querySelector('#progressStage').textContent === '已停止',
+        doc2.querySelector('#progressStage').textContent);
+  check('停止后不再给剩余时间', doc2.querySelector('#progressEta').textContent === '',
+        doc2.querySelector('#progressEta').textContent);
+  //  .bad 同时关掉那道流光（app.css：.progress-fill.bad::after { animation: none }）
+  check('停止后条子标成停止态', doc2.querySelector('#progressFill').className.includes('bad'),
+        doc2.querySelector('#progressFill').className);
+  check('时间线上也写了已停止',
+        [...doc2.querySelectorAll('#timeline .step')].some((s) => s.textContent.includes('已停止')));
 }
 
 console.log(`\n${ok}/${ok + fail} 通过`);

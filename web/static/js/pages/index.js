@@ -18,6 +18,20 @@ import { renderStats } from '../components/stats.js';
 
 /* ------------------------------ 时间线 ------------------------------ */
 
+/* 每种语气配一个自己的记号。**颜色不能是唯一的通道**——只靠颜色的编码对
+   红绿色觉障碍基本失效（需要注意.md 第 12b 条），而这一列要说的恰恰是
+   「哪几步本来不该发生」。记号选的是各自的意思：
+     ·  普通的一行
+     ↻  重写了一遍（修复 / 补线索）——它是「又转回去了」，不是出错
+     !  坏消息（重试、出错、线索没救回来的那一段）
+   `↻` **不来自等宽栈**。量过：40px 下它的宽度在 Cascadia Code / Consolas /
+   一个根本不存在的字体名下**全是 31.3**，而 `M` 分别是 23.4 / 22.0 / 32.5——
+   说明这个字符一路掉到了系统的符号兜底字体上，三种情况画的是同一个东西。
+   （`document.fonts.check()` 在这里靠不住：它对 "Courier New" 也返回 true。）
+   这不是问题，只是别指望它跟旁边的数字对齐——`.step .dot` 给的是定宽 16px +
+   居中，8.6px 的字形放得下；`✓` `✕` 也是同样一路兜底过来的，行为一致。 */
+const DOT = { warn: '↻', bad: '!' };
+
 class Timeline {
   constructor(el, metaEl) {
     this.el = el;
@@ -62,7 +76,7 @@ class Timeline {
     this.settle();
     const row = document.createElement('div');
     row.className = 'step' + (tone ? ' ' + tone : '');
-    row.innerHTML = `<span class="dot">${tone === 'bad' ? '!' : '·'}</span>`
+    row.innerHTML = `<span class="dot">${DOT[tone] || '·'}</span>`
       + `<span class="body">${escapeHtml(text)}`
       + (sub ? `<span class="sub">${escapeHtml(sub)}</span>` : '')
       + (quote ? `<span class="quote">${escapeHtml(quote)}</span>` : '')
@@ -106,9 +120,13 @@ const EVENT_HANDLERS = {
     ui.pg.setStage(ev.index && ev.total
       ? `${STAGE_TEXT[ev.phase] || ''}（第 ${ev.index}/${ev.total} 段）`
       : (STAGE_TEXT[ev.phase] || ev.message));
-    // 修复和补线索是「本来不该发生」的事，单独标出来，别混在正常步骤里
+    //  修复和补线索是「本来不该发生」的事：顺风路径上它们一次都不出现，
+    //  出现了就意味着这一段没写对、正在花第二次钱重写。所以两件事都要做——
+    //  不进「进行中」那条线（line 而不是 begin），并且**标成 warn**。
+    //  原来这里算出了 warn 却传了个空串下去，于是修复和「第 N 段完成」
+    //  长得一模一样，扫一眼看不出这一篇到底顺不顺（需要注意.md 第 12c 条）。
     const tone = (ev.phase === 'repair' || ev.phase === 'clue_fix') ? 'warn' : '';
-    if (tone) ui.tl.line(ev.message, '', '');
+    if (tone) ui.tl.line(ev.message, '', tone);
     else ui.tl.begin(ev.message);
   },
 
@@ -145,6 +163,11 @@ const EVENT_HANDLERS = {
     ui.articleId = ev.article_id;
   },
 
+  //  这条事件**在当前这条传输上到不了**：后端的 cancel 标志是由 SSE 流的收尾
+  //  逻辑置位的，而那一刻客户端已经断开，队列里的 cancelled 没人再读。
+  //  所以停止时真正生效的是下面 init() 里那一段（那里也停进度条）。
+  //  留着它不是摆设：管线以后要是换成能双向说话的传输（WebSocket），
+  //  这条就是那时的正路——但**别再把停止时该做的事只写在这里**。
   cancelled: (ev, ui) => {
     ui.cancelled = true;
     ui.pg.stop('已停止');
@@ -472,6 +495,12 @@ export async function init() {
 
     const secs = Math.round((Date.now() - started) / 1000);
     if (ui.cancelled) {
+      //  进度条必须在这里停，不能指望那个 cancelled 事件——它到不了（见
+      //  EVENT_HANDLERS.cancelled 上面那段）。不停的话，ticker 一停条子就冻在
+      //  原地，而旁边还留着「正在写正文（第 1/2 段）」和「预计还需 3 分」，
+      //  外加那道「我还活着」的流光（.progress-fill::after）——
+      //  用户刚按了停止，界面却在说它还在跑，还给了个剩余时间让人照着等。
+      pg.stop('已停止');
       tl.line('已停止', '这次没有落库；已经花掉的调用无法退回', 'bad');
       tl.meta(`${secs} 秒后停止`);
       toast('已停止生成', 'warn');

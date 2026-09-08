@@ -527,3 +527,68 @@ def test_词库的两种空态是分开的(client):
     节点——那样连模板里「去生成第一篇」的链接也一起冲掉了，空态反而没了出路。"""
     body = client.get("/words").text
     assert 'class="empty-none"' in body and 'class="empty-filtered"' in body
+
+
+# --------------------------------------------------------------- 设计令牌
+#
+# tokens.css 是「想整体换风格只改这一个文件」那条承诺的落点，而它里面有
+# **两份深色定义**（跟随系统的那份、手动切过的那份）。两份写的是同一套数值，
+# 也就正好落在「同一件事写两遍必然分叉」（需要注意.md 第 20 条）上。
+#
+# 分叉的表现是最难发现的那种：手动切到深色和跟随系统进深色**长得不一样**，
+# 而绝大多数人一辈子只走其中一条路径。jsdom 量不了颜色（第 16 条），
+# 所以只能在源文件这一层钉住。
+
+def _css_blocks(text: str) -> list[str]:
+    import re                                               # noqa: PLC0415
+
+    return re.findall(r"\{([^{}]*)\}", text, re.S)
+
+
+def _declared(block: str) -> list[str]:
+    import re                                               # noqa: PLC0415
+
+    return re.findall(r"(--[a-z0-9-]+)\s*:", block)
+
+
+def _tokens_css() -> str:
+    from pathlib import Path                                # noqa: PLC0415
+
+    return (Path(__file__).resolve().parents[1]
+            / "web" / "static" / "css" / "tokens.css").read_text(encoding="utf-8")
+
+
+def test_同一个令牌不许在一个块里声明两遍():
+    """写两遍的那一刻没有任何症状——两份取值一样，页面也不报错。
+    症状要等到有人来调其中一份：他改的是前面那份，后面那份把它盖掉，
+    表现是「改了没反应」，而 CSS 不会为此说一个字。
+    """
+    for block in _css_blocks(_tokens_css()):
+        names = _declared(block)
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        assert not dupes, f"同一个块里重复声明：{dupes}"
+
+
+def test_两份深色定义给出同一套值():
+    """一份给媒体查询（没手动切过 = 跟随系统），一份给 data-theme（手动切过）。
+    它们必须逐字相等，否则同一个用户走两条路径会看到两套配色。
+    """
+    import re                                               # noqa: PLC0415
+
+    text = _tokens_css()
+
+    def block(pattern: str) -> dict[str, str]:
+        m = re.search(pattern + r"\s*\{(.*?)\n\s*\}", text, re.S)
+        assert m, f"tokens.css 里找不到 {pattern}"
+        return {k: " ".join(v.split())
+                for k, v in re.findall(r"(--[a-z0-9-]+)\s*:\s*([^;]+);", m.group(1))}
+
+    follow = block(r':root:not\(\[data-theme="light"\]\)')
+    manual = block(r':root\[data-theme="dark"\]')
+    assert follow, "跟随系统那份深色是空的"
+    assert set(follow) == set(manual), (
+        f"只在跟随系统那份里：{sorted(set(follow) - set(manual))}；"
+        f"只在手动那份里：{sorted(set(manual) - set(follow))}"
+    )
+    differs = sorted(k for k in follow if follow[k] != manual[k])
+    assert not differs, f"两份深色取值不同：{differs}"

@@ -646,6 +646,16 @@ button.chip { cursor: pointer; }
 }
 .step.active .dot { color: var(--accent); }
 .step.done .dot  { color: var(--ok); }
+/* 修复 / 补线索。它不是错——管线正按设计在干活——但它是「本来不该发生」的：
+   顺风路径上一次都不出现，出现了就是在花第二次钱重写这一段。所以要和
+   正常步骤分得开，又不能读成红色的失败。橙 + 一道左缘竖条：
+   扫一眼就数得出这一篇被重写过几次，而那是「这篇顺不顺」最直接的一个数。 */
+.step.warn {
+  color: var(--warn); background: var(--warn-soft);
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+/* 节点的底要跟着所在行走，否则脊线会从一个亮圈里穿过去（同 .step.active .dot） */
+.step.warn .dot  { color: var(--warn); background: var(--warn-soft); }
 .step.bad        { color: var(--bad); }
 .step.bad .dot   { color: var(--bad); }
 .step .sub { display: block; font-size: 12px; color: var(--faint); margin-top: 1px; }
