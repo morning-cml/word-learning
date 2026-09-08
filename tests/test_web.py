@@ -325,6 +325,24 @@ def test_用词上限各档带词汇量(client):
     assert c["A2"] <= c["B1"] <= c["B2"] <= c["C1"], "累计值不能往回掉"
 
 
+def test_中文不会被当成目标词(client):
+    """人贴进来的词表十有八九是「abandon 抛弃」这种词 + 释义的形状。
+
+    原来的判据是 `str.isalpha()`，而**汉字的 isalpha() 也是 True**——于是
+    「抛弃」也成了一个目标词，整条管线拿它当英文词跑：选题给它安排段落、
+    每段找不到它就判 missing_target、两次修复预算全烧在一个不可能出现的词上，
+    最后报「目标词命中 2/4」。钱和几分钟都花掉了，文章还被稀释了一遍。
+    背单词那边为同一件事踩过一次（dictionary._is_english），判据只该有一个。
+    """
+    d = client.post("/api/article/plan-preview",
+                    json={"words": "abandon 抛弃\nsilence 寂静"}).json()
+    assert d["words"] == ["abandon", "silence"]
+    assert d["count"] == 2
+    # 带重音的英文词不能误伤
+    assert client.post("/api/article/plan-preview",
+                       json={"words": "naïve résumé"}).json()["count"] == 2
+
+
 def test_篇幅预览在词太多时给出警告(client):
     d = client.post("/api/article/plan-preview", json={"words": " ".join(
         f"word{i}" for i in range(30))}).json()

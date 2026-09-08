@@ -50,7 +50,20 @@ def test_最新的版本号排在最前():
     assert parsed == sorted(parsed, reverse=True), f"版本顺序乱了：{versions}"
 
 
-@pytest.mark.parametrize("path", ["/", "/library", "/words", "/settings", "/read/1"])
+def _all_page_paths() -> list[str]:
+    """从注册表现算，**不写死清单**。
+
+    原来这里是手写的五个路径。加页面时忘了往里补一条，这条测试就对新页面
+    一言不发——而它存在的全部理由恰恰是「漏了哪一页只有那一页不显示」。
+    写死的清单自己就是那个漏洞（需要注意.md 第 20 条：同一件事写两遍必然分叉）。
+    实际发生过：加背单词页时这两条路径就没被补进来。
+    """
+    from web.pages import PAGES
+
+    return [re.sub(r"\{[^}]+\}", "1", p.path) for p in PAGES]
+
+
+@pytest.mark.parametrize("path", _all_page_paths())
 def test_每个页面的顶栏都带着版本号(client, path):
     """顶栏是 base.html 渲的，所有页面共用——但「共用」是靠 pages.py 注入
     的那个上下文，漏了哪一页只有那一页不显示，而没人会逐页去看。"""

@@ -34,10 +34,25 @@ OUT = HERE / ".fixtures"
 
 sys.path.insert(0, str(ROOT))
 
-PAGES = [("index", "/"), ("library", "/library"), ("words", "/words"),
-         ("settings", "/settings"), ("reader", "/read/1")]
+def _pages() -> list[tuple[str, str]]:
+    """从 web/pages.py 的注册表现算，**不写死清单**。
 
-ENDPOINTS = ["/api/status", "/api/articles", "/api/words", "/api/settings", "/api/articles/1"]
+    原来这里是手写的五条。加页面时忘了往里补，前端测试就对新页面一言不发——
+    而这个文件存在的理由恰恰是「模板改了夹具跟着变」。写死的清单自己就是
+    那个漏洞（需要注意.md 第 20 条）。实际发生过：加背单词页时这里没跟上。
+    """
+    import re
+
+    from web.pages import PAGES as REGISTRY
+
+    return [(p.id, re.sub(r"\{[^}]+\}", "1", p.path)) for p in REGISTRY]
+
+
+PAGES = _pages()
+
+ENDPOINTS = ["/api/status", "/api/articles", "/api/words", "/api/settings", "/api/articles/1",
+             "/api/wordbook/status", "/api/wordbook/books",
+             "/api/reading/history?days=56"]
 
 #  一篇内容固定的文章。目标词、线索强度、掌握程度都是测试会断言的具体值。
 SEED_DOC = {

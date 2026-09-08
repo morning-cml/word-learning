@@ -243,7 +243,111 @@ def test_累计词汇量是单调不减的():
     assert set(counts) == set(cefr.LEVELS)
     values = [counts[lv] for lv in cefr.LEVELS]
     assert values == sorted(values), "累计值不能往回掉"
-    assert values[-1] == cefr.size(), "最高一级的累计值就是整张表"
+    # 口径必须是「标尺认得出等级的词」，不是「CEFR-J 收了多少词」：
+    # 词频回落进来的那批也归标尺管，不数进来的话首页显示的词汇量
+    # 就比程序实际放行的少一截，而这种不一致用户没法自己发现。
+    ruler_knows = cefr.size() + sum(
+        1 for w in cefr._freq_table() if w not in cefr._load()[0] and cefr.level_of(w))
+    assert values[-1] == ruler_knows, "最高一级的累计值 = 标尺认得出等级的全部词"
+
+
+# ------------------------------------------------- 词频回落（CEFR-J 查不到时）
+#
+# 这一组盯的是「标尺放松过头」——它不会报错，只会让一批真的难词溜进文章，
+# 而读者读不出线索时不会来报（能看出线索够不够的人本来就认识那个词）。
+# 所以每一条都要么钉住方向（只回落不覆盖、没证据不放行），要么钉住标定结果。
+
+
+def test_CEFR查不到时才回落到词频(cefr_table):
+    """顺序不能反：CEFR-J 是人工分级，词频只是代用品。
+
+    真词表里 aesthetic 是 C1、cognitive 是 C2，而两者的词频都排在 B2 线以内——
+    要是让词频覆盖 CEFR-J，这两个词就会被当成 B2 放行。
+    """
+    cefr_table({"aesthetic": "C1"}, freq={"aesthetic": 100, "obscureword": 100})
+    assert cefr.level_of("aesthetic") == "C1", "CEFR-J 有的词必须以它为准"
+    assert cefr.level_of("obscureword") == "A1", "CEFR-J 没有的才回落"
+
+
+def test_没有证据就不放行(cefr_table):
+    """词典里查不到、或者查得到但没有词频，一律照旧判超纲。
+
+    方向是「往严不往松」（见 within 上面那段）：回落是拿证据换放行，
+    没有证据就没有放行，而不是「没查到就当它简单」。
+    """
+    cefr_table({"the": "A1"}, freq={})
+    assert cefr.level_of("zzzznotaword") is None
+    assert cefr.within("zzzznotaword", "C2") is False
+
+
+def test_词典缺失时回落自动关掉(cefr_table):
+    """dict.csv 没生成过的机器上，标尺要退回只认 CEFR-J，而不是报错。
+
+    和 CEFR-J 缺失时退回内置兜底表是同一个处理方式：少一样东西不该让功能中断。
+    """
+    cefr_table({"the": "A1"}, freq={})
+    assert cefr.freq_available() is False
+    assert cefr.scan("The quixotic thing", "B2")["offender_count"] >= 1
+
+
+def test_回落按候选里最容易的那个算(cefr_table):
+    """和 level_of 对 CEFR 表的做法一致：一个词形有一种读者认得的读法就够了。"""
+    cefr_table({}, freq={"cone": 500, "con": 30000})
+    assert cefr.level_of("cones") == "A2", "cone 比 con 常用，该按 cone 算"
+
+
+@pytest.mark.parametrize("word", ["toward", "color", "program", "realize", "center",
+                                  "behavior", "recognize", "onto"])
+def test_标尺自己不认识的常用词不再判超纲(word):
+    """这几个是 db.add_word 注释里点名的误报词——CEFR-J 没收，但都是常用词。
+
+    修之前它们每篇都在往 too_hard 里跳，拿修复预算去让模型「换成 B2 以内的说法」，
+    等于花钱把 toward、color 从文章里删掉。这条用真数据跑，
+    因为要验的正是「仓库里这两份数据接上了没有」。
+    """
+    if not cefr.is_real_data() or not cefr.freq_available():
+        pytest.skip("这台机器上没有真词表或没有词典，验不了")
+    assert word not in cefr._load()[0], f"{word} 已经进 CEFR-J 了，这条测试该换个词"
+    assert cefr.within(word, "B2"), f"{word} 不该被判成超纲"
+
+
+@pytest.mark.parametrize("word", ["soundproof", "obfuscate", "ubiquitous"])
+def test_真正的难词仍然判超纲(word):
+    """回落是有阈值的，不是放行一切。这几个词典里有、但词频很低。"""
+    if not cefr.is_real_data() or not cefr.freq_available():
+        pytest.skip("这台机器上没有真词表或没有词典，验不了")
+    assert not cefr.within(word, "B2"), f"{word} 不该被放行"
+
+
+def test_回落阈值是递增的():
+    """阈值乱序的话，某一档会比它下面那档更严，出现「B2 比 B1 难」的倒挂。"""
+    cuts = [cefr.FREQ_CUTOFFS[lv] for lv in cefr.LEVELS[:-1]]
+    assert cuts == sorted(cuts), cuts
+    assert set(cefr.FREQ_CUTOFFS) == set(cefr.LEVELS[:-1]), "C2 是兜底档，不该有阈值"
+
+
+def test_回落只放松不收紧():
+    """标尺不该因为多了一个数据源而突然多判一批超纲词。
+
+    回落只在 CEFR-J 一个候选都没命中时才跑，所以对任何词的判定只可能变松。
+    这条盯的是「以后有人把它挪到 CEFR 查询前面」。
+    """
+    from core.lexicon.lemma import lemma_candidates      # noqa: PLC0415
+
+    if not cefr.freq_available():
+        pytest.skip("这台机器上没有词典")
+    table = cefr._load()[0]
+    checked = 0
+    for word in cefr._freq_table():
+        if word not in table:
+            continue
+        # CEFR-J 有的词，判定必须和没有回落时完全一样
+        hits = [table[c] for c in lemma_candidates(word) if c in table]
+        assert cefr.level_of(word) == min(hits, key=lambda lv: cefr.LEVEL_INDEX[lv]), word
+        checked += 1
+        if checked >= 500:
+            break
+    assert checked >= 100, "样本太少，这条测试在空跑（第 17b 条）"
 
 
 def test_词表本身是就绪的():

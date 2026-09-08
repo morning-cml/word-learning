@@ -109,6 +109,103 @@ def vocabulary() -> set[str]:
     return set(_load()[0])
 
 
+# ---------------------------------------------------------------------------
+# 第二判据：CEFR-J 查不到时，回落到词频
+#
+# 为什么需要它。CEFR-J 只有 8653 条，而这个仓库里**同时还躺着一份 33217 条的
+# ECDICT 表**（data/wordbook/dict.csv，为背单词页提交的），两份数据从来没说过话。
+# 于是 25131 个词只因为「不在那 8653 条里」就被判超纲——其中 2903 个词频排进
+# 前一万，875 个还带着中学 / 四级考纲标签。`toward`、`color`、`program`、
+# `realize`、`center`、`behavior`、`recognize` 全在这批里，而 db.add_word 的
+# 注释早就点过名：「多数是标尺自己不认识的词」。
+#
+# 代价不是「多报一个词」：check_paragraph 会据此判 too_hard，拿修复预算去要求
+# 模型「把 toward 换成 B2 以内的说法」——花钱把一段本来合格的文章改坏，
+# 而结果面板上那个「超纲词占比」还跟着虚高。
+#
+# 为什么是词频，不是考纲标签。标签（zk / gk / cet4）看着更贴这个用户群，
+# 但它**验不了**：CEFR-J 里没有这些词，就没有真值可以对。而词频有 7915 个
+# 两表都有的词可以做留出验证。一个能量的判据胜过两个不能量的（第 20 条：
+# 同一件事两套判据必然分叉）。
+#
+# 阈值怎么定的——这一段是重点，因为第一次算出来的数是**错的**。
+#
+#   · 先按「词频 <= r 的词里有 95% 真在 L 档以内」反解，得到 B2 = 7386。
+#     看着很稳。
+#   · 但那个 95% 是在**留出集**上算的，而留出集就是 CEFR-J 自己的词表——
+#     A1-B2 占 81%。真正会走到回落的是它**不认识**的词，那批先验上更难。
+#     基率一变，估出来的精度必然偏乐观。
+#   · 于是换个问法验：把 C1/C2 那 1528 个词藏起来，假装 CEFR-J 不认识它们，
+#     看回落会把多少个放进 B2。答案是 **250 个，16.4%**——说好的 5% 泄漏，
+#     实际是 16%。
+#
+# 所以阈值必须落在每一档的**严端**，不是中位：**CEFR-J 不认识的词，先验上比
+# 它认识的更难**，那就按它认识的那批里最难的四分之一来卡。取各档观测到的
+# 25 分位，藏难词再验一遍：B2 档漏放降到 3.2%（49/1528），而 330 个未收录的
+# 常用词被放行，上面点名的那几个一个不落。3.2% 落在 CEFR-J 自己相邻档的
+# 噪声以内（人工评级在相邻档上本来就常有分歧），可以接受。
+#
+# 两条守住的：
+#   · **只回落，不覆盖。** CEFR-J 有的词一律以它为准——它是人工分级，
+#     词频只是代用品。aesthetic（真值 C1）、cognitive（真值 C2）按词频都会被
+#     判成 B2，正好说明这条不能反过来。
+#   · **没有证据就不放行。** 词典里查不到、或者查到了但没有词频的词，
+#     照旧判超纲（half-finished 就是）。方向仍然是「往严不往松」。
+#
+# 数字要重新标定时跑 scripts/ 下那几个标定脚本的做法：把 dict.csv 和
+# cefr.csv 的交集按档分组、取各档 frq 的 25 分位。别拍脑袋改。
+# ---------------------------------------------------------------------------
+
+#: 词频排名 <= 这个数，就认这一档。取自 7915 个双表词各档 frq 的 25 分位。
+FREQ_CUTOFFS: dict[str, int] = {
+    "A1": 316, "A2": 1125, "B1": 2331, "B2": 4302, "C1": 7582,
+}
+
+
+@lru_cache(maxsize=1)
+def _freq_table() -> dict[str, int]:
+    """词形（小写）-> 词频排名。词典缺失就返回空表，回落自动关掉。
+
+    直接借 core.wordbook.dictionary 那份已经缓存好的表，不自己再读一遍 CSV：
+    「这个 CSV 长什么样」只该有一处知道（第 20 条）。函数内 import 是为了
+    不在 core.lexicon 的导入期把词典也拉起来——它 3.7MB，而绝大多数用到
+    lexicon 的地方（测试尤其）根本不需要它。
+    """
+    try:
+        from core.wordbook import dictionary
+    except ImportError:                      # pragma: no cover
+        return {}
+    out: dict[str, int] = {}
+    for word, row in dictionary._load().items():
+        raw = (row.get("frq") or "").strip()
+        if raw.isdigit() and int(raw) > 0:
+            out[word] = int(raw)
+    return out
+
+
+def freq_available() -> bool:
+    return bool(_freq_table())
+
+
+def _level_from_freq(word: str) -> str | None:
+    """按词频给一个等级。没有词频数据就返回 None（= 没有证据，照旧判超纲）。
+
+    和 level_of 一样在词形候选上取**最容易**的那一个（词频里就是排名最小的），
+    理由同 level_of：只要这个词形有一种读者认得的读法，他就读得下去。
+    """
+    table = _freq_table()
+    if not table:
+        return None
+    ranks = [table[cand] for cand in lemma_candidates(word) if cand in table]
+    if not ranks:
+        return None
+    best = min(ranks)
+    for level in LEVELS[:-1]:
+        if best <= FREQ_CUTOFFS[level]:
+            return level
+    return "C2"
+
+
 def level_of(word: str) -> str | None:
     """查一个词的 CEFR 等级，自动尝试词形还原。查不到返回 None。
 
@@ -137,10 +234,15 @@ def level_of(word: str) -> str | None:
 
     min 遇到并列取先出现的，而 lemma_candidates 把词本身排在最前——
     等级一样时仍然以词本身为准，行为不变。
+
+    CEFR-J 一个候选都没命中时，才回落到词频（见上面 FREQ_CUTOFFS 那一段）。
+    **顺序不能反**：CEFR-J 是人工分级，词频只是代用品。
     """
     table = _load()[0]
     hits = [table[cand] for cand in lemma_candidates(word) if cand in table]
-    return min(hits, key=lambda lv: LEVEL_INDEX[lv]) if hits else None
+    if hits:
+        return min(hits, key=lambda lv: LEVEL_INDEX[lv])
+    return _level_from_freq(word)
 
 
 def resolve(word: str) -> str:
@@ -165,11 +267,22 @@ def level_counts() -> dict[str, int]:
     那张表只有两千来个词且全标 A1，此时写死的数字会和程序实际执行的标尺
     对不上——而「界面说的」和「实际拦的」不一致，正是用户没法自己发现的那类错。
     调用方拿 is_real_data() 决定要不要显示这些数字。
+
+    **词频回落进来的词也要算。** 同样是那条「界面说的必须等于实际拦的」：
+    标尺现在放行 CEFR-J 之外的一批常用词（见 FREQ_CUTOFFS），这里不跟着算，
+    首页那个「B2 = 6863 词」就比程序实际允许的少了几百个——而这种不一致
+    恰好是用户没法自己发现的。口径只有一个：**level_of 认它是这一档，它就该被数进来。**
     """
     table = _load()[0]
     per: dict[str, int] = dict.fromkeys(LEVELS, 0)
     for level in table.values():
         per[level] += 1
+    # 回落只对 CEFR-J 没收的词生效，所以这里数的是「词典有、CEFR-J 没有」的那部分
+    for word in _freq_table():
+        if word not in table:
+            level = _level_from_freq(word)
+            if level:
+                per[level] += 1
     out, running = {}, 0
     for level in LEVELS:
         running += per[level]

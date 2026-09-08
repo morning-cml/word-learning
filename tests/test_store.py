@@ -384,3 +384,227 @@ def test_改掌握程度(temp_db):
     assert r["status_label"] == "已掌握"
     with temp_db.session() as s:
         assert temp_db.word_detail(s, "abandon")["status"] == 98
+
+
+# --------------------------------------------------------------- 导出
+#
+# `data/app.db` 是这个项目唯一不可再生的资产，而在这之前它一个出口都没有。
+# 导出这一层不改任何东西，所以它的风险不在「会不会写坏库」，
+# 在**导出来的东西是不是完整的**——少了一部分不会报错，
+# 而用户拿它当备份，等到需要它那天才发现缺。
+
+
+def test_词库导出一行一处语境(temp_db):
+    """一个词在不同故事里出现多次，正是这个产品声称最有效的机制。
+
+    压成一行只留一句例句，等于在导出这一步把核心资产丢掉了。
+    """
+    import csv
+    import io
+
+    from core.store import export
+
+    def doc(en, zh, surface):
+        return {**DOC, "paragraphs": [{
+            "sentences": [{"en": en, "zh": zh,
+                           "targets": [{"lemma": "abandon", "surface": surface}]}],
+            "audits": [{"lemma": "abandon", "strength": "strong", "clue": "空了很久"}],
+        }]}
+
+    with temp_db.session() as s:
+        temp_db.save_article(s, doc("The shop was abandoned.", "小店废弃了。", "abandoned"), META)
+        temp_db.save_article(s, doc("They abandon the plan.", "他们放弃计划。", "abandon"), META)
+    with temp_db.session() as s:
+        text = export.words_csv(s)
+
+    assert text.startswith("\ufeff"), "少了 BOM，Excel 会把中文列读成乱码"
+    rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+    assert rows[0][0] == "词" and rows[0][-1] == "线索强度"
+    abandon = [r for r in rows[1:] if r[0] == "abandon"]
+    assert len(abandon) == 2, "两处语境要出两行，不能压成一行"
+    assert {r[9] for r in abandon} == {"The shop was abandoned.", "They abandon the plan."}
+    assert all(r[12] == "充分" for r in abandon), "线索强度要翻成人看得懂的"
+    assert all(r[4] == "2" for r in abandon), "见过次数"
+    assert all(r[5] == "2" for r in abandon), "出现在几篇"
+
+
+def test_没有语境的词也要出一行(temp_db):
+    """标成「忽略」的词一条 Encounter 都没有。导出时整个消失的话，
+    用户下次导入 / 核对时会以为自己从没标过它。"""
+    import csv
+    import io
+
+    from core.store import export
+
+    with temp_db.session() as s:
+        temp_db.add_word(s, "nora", 99)
+    with temp_db.session() as s:
+        rows = list(csv.reader(io.StringIO(export.words_csv(s).lstrip("\ufeff"))))
+    nora = [r for r in rows[1:] if r[0] == "nora"]
+    assert len(nora) == 1
+    assert nora[0][3] == "忽略"
+    assert nora[0][9] == "", "没有语境的那几列留空，而不是这一行不出现"
+
+
+def test_导出的行序每次都一样(temp_db):
+    """导出是拿去归档和 diff 的。按「最近见过」排的话，两次导出的差异里
+    混着一堆纯粹的位置变动，真正改了什么反而看不出来。"""
+    import csv
+    import io
+
+    from core.store import export
+
+    save(temp_db, 2)
+    with temp_db.session() as s:
+        first = export.words_csv(s)
+        second = export.words_csv(s)
+    assert first == second
+    rows = list(csv.reader(io.StringIO(first.lstrip("\ufeff"))))[1:]
+    words = [r[0] for r in rows]
+    assert words == sorted(words), "按词条字母序，不按最近见过"
+
+
+def test_词库导出接口(client):
+    r = client.get("/api/words/export.csv")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "attachment" in r.headers["content-disposition"]
+    assert r.text.startswith("\ufeff")
+
+
+def test_导出路由没被词条详情吃掉(client):
+    """`/words/{lemma}` 注册在前的话，`export.csv` 会被当成一个词，
+    回一个 404「词条 export.csv 不存在」——而这种错只有访问导出时才现形。"""
+    r = client.get("/api/words/export.csv")
+    assert r.status_code == 200, "被 /words/{lemma} 抢走了"
+    assert "词条" not in r.text[:200]
+
+
+# --------------------------------------------------------------- 阅读走势
+#
+# 这一组盯的是**按天分组的时区**。created_at 存的是 UTC，直接 .date() 就是按
+# UTC 切天——东八区凌晨读的那篇会算到前一天，「连续几天」跟着断。差一整天，
+# 而且没有任何报错。tz 参数就是为了让这条在 UTC 的机器上（CI 就是）也验得了：
+# 拿本机时区去验本机时区永远是空跑（第 17 条）。
+
+
+def _at(db, when, words=100):
+    """造一篇 created_at 落在指定时刻的文章。"""
+    from core.store.models import Article
+
+    with db.session() as s:
+        a = Article(title_en="x", stats={"word_count": words})
+        s.add(a)
+        s.flush()
+        a.created_at = when.replace(tzinfo=None)     # 库里存的是 naive UTC
+
+
+def test_按天分组用的是本地时区不是UTC(temp_db):
+    """东八区凌晨 00:30 那篇，UTC 上是前一天 16:30。
+
+    按 UTC 切天的话它会掉到前一天去——用户早上打开看到「昨天读了」，
+    而他记得自己是今天凌晨读的。差一整天，不报错。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    east8 = timezone(timedelta(hours=8))
+    # 东八区 2026-09-08 00:30 == UTC 2026-09-07 16:30
+    when = datetime(2026, 9, 8, 0, 30, tzinfo=east8).astimezone(timezone.utc)
+    assert when.date().isoformat() == "2026-09-07", "样例构造错了，两边日期得不一样"
+    _at(temp_db, when)
+
+    with temp_db.session() as s:
+        east = temp_db.reading_history(s, days=3650, tz=east8)
+        utc = temp_db.reading_history(s, days=3650, tz=timezone.utc)
+    assert [d["date"] for d in east["days"]] == ["2026-09-08"]
+    assert [d["date"] for d in utc["days"]] == ["2026-09-07"], "对照组：UTC 下确实是前一天"
+
+
+def test_同一天的多篇合并成一天(temp_db):
+    from datetime import timezone
+
+    from core.store.models import utcnow
+
+    now = utcnow()
+    _at(temp_db, now, 210)
+    _at(temp_db, now, 180)
+    with temp_db.session() as s:
+        h = temp_db.reading_history(s, tz=timezone.utc)
+    assert len(h["days"]) == 1
+    assert h["days"][0]["words"] == 390 and h["days"][0]["articles"] == 2
+    assert h["total_words"] == 390
+
+
+def test_累计值是一路加上去的(temp_db):
+    from datetime import timedelta, timezone
+
+    from core.store.models import utcnow
+
+    now = utcnow()
+    for d, w in ((4, 100), (2, 200), (0, 300)):
+        _at(temp_db, now - timedelta(days=d), w)
+    with temp_db.session() as s:
+        h = temp_db.reading_history(s, tz=timezone.utc)
+    assert [d["words"] for d in h["days"]] == [100, 200, 300]
+    assert [d["total"] for d in h["days"]] == [100, 300, 600]
+
+
+def test_连续天数断在空档上(temp_db):
+    """连续几天是这一块唯一有「坚持」含义的数字，多算一天就是在骗人。"""
+    from datetime import timedelta, timezone
+
+    from core.store.models import utcnow
+
+    now = utcnow()
+    for d in (0, 1, 2, 5):          # 今天、昨天、前天连着；第 5 天单独一天
+        _at(temp_db, now - timedelta(days=d))
+    with temp_db.session() as s:
+        assert temp_db.reading_history(s, tz=timezone.utc)["streak"] == 3
+
+
+def test_今天还没读时从昨天往回数(temp_db):
+    """不这么算的话，早上打开应用看到的永远是 0——而昨天明明读了。"""
+    from datetime import timedelta, timezone
+
+    from core.store.models import utcnow
+
+    now = utcnow()
+    for d in (1, 2):
+        _at(temp_db, now - timedelta(days=d))
+    with temp_db.session() as s:
+        assert temp_db.reading_history(s, tz=timezone.utc)["streak"] == 2
+
+
+def test_老文章没有字数记录时如实报出来(temp_db):
+    """早期文章没存过 word_count。算 0 但不说的话，那几天画出来是空的，
+    看着像那天没读——而他明明读了。"""
+    from datetime import timezone
+
+    from core.store.models import Article, utcnow
+
+    _at(temp_db, utcnow(), 200)
+    with temp_db.session() as s:
+        s.add(Article(title_en="old", stats={}))
+    with temp_db.session() as s:
+        h = temp_db.reading_history(s, tz=timezone.utc)
+    assert h["missing_word_count"] == 1
+    assert h["total_words"] == 200
+
+
+def test_空库不报错(temp_db):
+    from datetime import timezone
+
+    with temp_db.session() as s:
+        h = temp_db.reading_history(s, tz=timezone.utc)
+    assert h == {"days": [], "streak": 0, "total_words": 0,
+                 "total_articles": 0, "missing_word_count": 0}
+
+
+def test_阅读走势接口(client):
+    r = client.get("/api/reading/history?days=30")
+    assert r.status_code == 200
+    assert set(r.json()) == {"days", "streak", "total_words",
+                             "total_articles", "missing_word_count"}
+    # days 收敛到合理范围，别让一个 days=99999 把整库扫成一张巨表
+    assert client.get("/api/reading/history?days=0").status_code == 200
+    assert client.get("/api/reading/history?days=100000").status_code == 200

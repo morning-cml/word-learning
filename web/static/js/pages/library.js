@@ -83,6 +83,87 @@ function cost(impact) {
   return text + '。文章能重新生成，累计语境不能。';
 }
 
+/* ------------------------------ 阅读走势 ------------------------------
+
+   单序列日柱。为什么不是折线：这个应用一周也就生成几篇，中间大片是零，
+   折线穿过零点会画出「一直在读」的假象——而**空档本身就是信息**，
+   「连续几天」那个数正是从空档来的。
+
+   单序列所以不给图例（标题已经说了画的是什么），也不给 y 轴：
+   只直接标出最高的那一天。绝不每根柱子都标数。 */
+
+const DAYS = 56;              // 八周。再长柱子就细到看不清，再短看不出节奏。
+
+function renderReading(h) {
+  const box = $('#reading');
+  const days = h?.days || [];
+  //  一天数据都没有就整块不出现。画一条全零的线比不画更糟——
+  //  它看着像「读了但都是 0 词」。
+  if (!days.length) { box.hidden = true; return; }
+  box.hidden = false;
+
+  //  按天补齐空档：接口只回有文章的那几天，而没读的那些天正是要看的东西。
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const end = new Date(days[days.length - 1].date + 'T00:00:00');
+  const slots = [];
+  for (let i = DAYS - 1; i >= 0; i--) {
+    const d = new Date(end);
+    d.setDate(d.getDate() - i);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+              + `-${String(d.getDate()).padStart(2, '0')}`;
+    slots.push(byDate.get(key) || { date: key, words: 0, articles: 0 });
+  }
+
+  const peak = Math.max(...slots.map((s) => s.words), 1);
+  html($('#readingDays'), slots.map((s) => {
+    //  最矮也留 2px：一天读了 12 个词的话，按比例算出来是 0，那一天就消失了
+    const h = s.words ? Math.max(2, Math.round(56 * s.words / peak)) : 2;
+    return `<button type="button" class="reading-day${s.words ? '' : ' zero'}"
+              data-date="${s.date}" data-words="${s.words}" data-articles="${s.articles}"
+              aria-label="${s.date}　${s.words} 词"><i style="height:${h}px"></i></button>`;
+  }).join(''));
+
+  //  只标最高那一天（dataviz：直接标注要稀疏才起作用）
+  const at = slots.findIndex((s) => s.words === peak);
+  const old = $('#readingPlot .reading-peak');
+  if (old) old.remove();
+  if (peak > 1) {
+    const mark = document.createElement('span');
+    mark.className = 'reading-peak';
+    mark.textContent = `${peak} 词`;
+    mark.style.left = `${(at + 0.5) / slots.length * 100}%`;
+    $('#readingPlot').appendChild(mark);
+  }
+
+  const n = (v) => Number(v || 0).toLocaleString();
+  html($('#readingTotals'),
+    `累计读过 <b>${n(h.total_words)}</b> 词`
+    + (h.streak ? `　·　连续 <b>${h.streak}</b> 天` : ''));
+  //  早期文章没记字数，说出来。不说的话那几天画成 0，看着像那天没读。
+  $('#readingNote').textContent = h.missing_word_count
+    ? `${h.missing_word_count} 篇早期文章没有字数记录，未计入`
+    : '';
+  $('#readingFrom').textContent = slots[0].date;
+  $('#readingTo').textContent = slots[slots.length - 1].date;
+}
+
+function bindReadingTip() {
+  const tip = $('#readingTip');
+  on($('#readingDays'), 'mouseover', '.reading-day', (e, el) => {
+    const words = Number(el.dataset.words);
+    tip.innerHTML = `<b>${el.dataset.date}</b><br>`
+      + (words ? `${words.toLocaleString()} 词 · ${el.dataset.articles} 篇` : '这天没读');
+    //  浮层跟着**柱子**走，不跟鼠标：柱子只有几像素宽，跟鼠标会一直抖。
+    //  减掉横向滚动量：浮层挂在滚动容器**外面**（容器 overflow-x 会把往上弹的
+    //  浮层一起裁掉），所以它的坐标系不跟着滚，得自己补这一项。
+    const scroller = $('#readingScroll');
+    tip.style.left =
+      `${el.offsetLeft + el.offsetWidth / 2 - (scroller ? scroller.scrollLeft : 0)}px`;
+    tip.classList.add('show');
+  });
+  $('#readingDays').addEventListener('mouseleave', () => tip.classList.remove('show'));
+}
+
 async function load() {
   disarm();                            // 重渲染会把确认框连同它的行一起换掉
   const { articles } = await api.article.list();
@@ -99,6 +180,11 @@ async function load() {
       <div class="stat ok"><b>${stats.seen_multi}</b><span>在多个语境中见过</span></div>
       <div class="stat"><b>${stats.seen_once}</b><span>只见过一次</span></div>`);
   }
+
+  //  走势拉不到就不画，不影响这一页的主要内容
+  try {
+    renderReading(await api.readingHistory(DAYS));
+  } catch (err) { $('#reading').hidden = true; }
 }
 
 export async function init() {
@@ -150,6 +236,8 @@ export async function init() {
   });
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') disarm(); });
+
+  bindReadingTip();          // 委托，所以只挂一次；重渲染柱子不会失效
 
   await load();
 }

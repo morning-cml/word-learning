@@ -11,16 +11,17 @@ import queue
 import threading
 from typing import Any, Iterator
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Response
 from fastapi.responses import StreamingResponse
 
 import tasks
 from core import settings
 from core.lexicon import cefr
+from core.lexicon.lemma import WORD_RE
 from core.llm.client import LLM
 from core.provider import registry
 from core.provider.base import ProviderError
-from core.store import db
+from core.store import db, export
 from core.store.models import STATUS_IGNORED, STATUS_LABELS, as_utc
 from tasks.article.task import (
     MAX_PARAGRAPHS,
@@ -36,7 +37,19 @@ _SENTINEL = object()
 
 
 def _parse_words(raw: Any) -> list[str]:
-    """接受数组，或用换行 / 逗号 / 空格分隔的一整段文本。"""
+    """接受数组，或用换行 / 逗号 / 空格分隔的一整段文本。
+
+    判据是「含 ASCII 字母」，不是 `str.isalpha()`：**汉字的 isalpha() 也是 True**。
+    人贴进来的词表十有八九是「abandon 抛弃」这种词 + 释义的形状，按 isalpha()
+    收的话「抛弃」也算一个目标词——然后整条管线拿它当英文词跑：选题要给它安排
+    段落，check_paragraph 逐段找它、找不到就判 missing_target，两次修复预算全烧
+    在一个不可能出现的词上，最后结果面板报「目标词命中 2/4」。
+    钱和几分钟都花掉了，文章还被稀释了一遍。
+
+    `WORD_RE` 是这个项目对「一个英文词形」的既定判据（core/lexicon/lemma.py），
+    背单词那边也踩过同一个坑（dictionary._is_english）——同一件事没有理由
+    在这里再立第三套（需要注意.md 第 20 条）。
+    """
     if isinstance(raw, list):
         items = [str(x) for x in raw]
     else:
@@ -45,7 +58,7 @@ def _parse_words(raw: Any) -> list[str]:
     for item in items:
         for token in item.split():
             w = token.strip().strip(".,;:!?\"'()[]{}").lower()
-            if w and w not in seen and any(c.isalpha() for c in w):
+            if w and w not in seen and WORD_RE.search(w):
                 seen.add(w)
                 out.append(w)
     return out
@@ -289,6 +302,34 @@ def delete_article(article_id: int) -> dict:
     return {"ok": True, "backup": {"made": bool(snap.get("made")),
                                    "name": snap.get("latest", ""),
                                    "error": "" if snap.get("ok", True) else snap.get("error", "")}}
+
+
+@router.get("/reading/history")
+def reading_history(days: int = 90) -> dict:
+    """按天的阅读量 + 连续天数。文库页拿它画那条走势。
+
+    数据全部来自已经入库的东西（Article.created_at + stats.word_count），
+    零 schema 改动——这个应用一直在攒这份东西，只是从来没显示过。
+    """
+    with db.session() as s:
+        return db.reading_history(s, days=max(1, min(days, 365)))
+
+
+@router.get("/words/export.csv")
+def export_words() -> Response:
+    """把整个词库导成 CSV：一行一处语境。
+
+    路由排在 `/words/{lemma}` **前面**——FastAPI 按注册顺序匹配，反过来的话
+    `export.csv` 会被当成一个 lemma 吃掉，回一个 404「词条 export.csv 不存在」。
+    这种错不会在别处冒出来，只有访问导出时才现形。
+    """
+    with db.session() as s:
+        body = export.words_csv(s)
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="words.csv"'},
+    )
 
 
 @router.get("/words/{lemma}")

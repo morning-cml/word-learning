@@ -12,6 +12,23 @@
 
   <div class="card" id="summaryCard" hidden>
     <div class="stats" id="summary"></div>
+
+    {# 阅读走势。放进已有这张卡而不是另起一张：再开一张全是数字的卡，
+       「篇文章」那一格就会出现两次。数据全部来自已经入库的东西。 #}
+    <div class="reading" id="reading" hidden>
+      <div class="reading-head">
+        <span class="reading-title">每天读了多少词</span>
+        <span class="reading-figure" id="readingTotals"></span>
+        <span class="reading-note" id="readingNote"></span>
+      </div>
+      <div class="reading-frame" id="readingPlot">
+        <div class="reading-plot" id="readingScroll">
+          <div class="reading-days" id="readingDays"></div>
+        </div>
+        <div class="reading-tip" id="readingTip" role="status"></div>
+      </div>
+      <div class="reading-axis"><span id="readingFrom"></span><span id="readingTo"></span></div>
+    </div>
   </div>
 
   <div class="card">

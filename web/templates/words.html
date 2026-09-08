@@ -28,6 +28,11 @@
         <button class="chip" type="button" data-filter="once">只见过一次</button>
         <button class="chip" type="button" data-filter="known">已掌握</button>
       </div>
+      <span class="spacer"></span>
+      {# 导的是**全部**词和**全部**语境，不跟着上面的筛选走——筛选是看的时候用的，
+         而导出是拿去归档和搬去别处的，跟着筛选走会导出一份残缺的东西而不说一声。 #}
+      <a class="btn btn-sm" id="exportWords" href="/api/words/export.csv" download
+         title="导出全部词条与语境（CSV，Excel 可直接打开）">导出 CSV</a>
     </div>
 
     <div class="table-scroll">

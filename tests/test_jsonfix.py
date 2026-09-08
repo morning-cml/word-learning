@@ -237,3 +237,57 @@ def test_截断的输入不交给第5层():
     第 4 层只丢不补，残缺的输入到它为止。"""
     with pytest.raises(jsonfix.JsonParseError):
         jsonfix.loads('{"sentences": [{"e')
+
+
+# ------------------------------------------------- 是第几层修好的（仪表）
+#
+# 五层兜底一直没有任何仪表。需要注意.md 第 1b 条那条「第 4 层一直在跑、
+# 但一次都没成功过」是靠人工翻代码发现的——没有东西会报出来。
+# 这一组盯的就是这个信号本身：它错了，后面所有基于它的判断都是错的。
+
+
+@pytest.mark.parametrize("text,layer", [
+    ('{"a": 1}', jsonfix.LAYER_DIRECT),
+    ('{"a": 1,}', jsonfix.LAYER_DIRECT),          # 尾随逗号仍算第 1 层
+    ('```json\n{"a": 1}\n```', jsonfix.LAYER_FENCE),
+    ('好的，这是你要的结果：{"a": 1} 以上。', jsonfix.LAYER_SLICE),
+    ('{"sentences": [{"en": "one"}, {"en": "tw', jsonfix.LAYER_TRUNCATED),
+])
+def test_报得出是第几层修好的(text, layer):
+    got, reported = jsonfix.loads_reported(text)
+    assert reported == layer, f"{text!r} 报成了 {reported}"
+    assert got is not None
+
+
+@jsonrepair
+def test_第5层也报得出来():
+    """中文引号只有 json_repair 修得了，前四层都过不去。"""
+    _got, layer = jsonfix.loads_reported('{“a”: 1}')
+    assert layer == jsonfix.LAYER_REPAIRED
+
+
+def test_loads_和_loads_reported_给出同一个值():
+    """loads() 是 loads_reported() 的薄包装，两者不能分叉（第 20 条）。"""
+    for text in ('{"a": 1}', '```json\n{"b": [1, 2]}\n```', '前言 {"c": "x"} 后记'):
+        assert jsonfix.loads(text) == jsonfix.loads_reported(text)[0]
+
+
+def test_解析失败时两个入口都抛():
+    for fn in (jsonfix.loads, jsonfix.loads_reported):
+        with pytest.raises(jsonfix.JsonParseError):
+            fn("这里面一个括号都没有")
+
+
+def test_层名累进_Usage():
+    """client.py 把层名累进 Usage，任务层再把它写进 stats。
+
+    这一步断的是链路，不是 jsonfix 本身：中间少一环，界面上那一行就永远不出现，
+    而它长得和「一切正常」一模一样（第 12b 条）。
+    """
+    from core.llm.client import Usage
+
+    u = Usage()
+    u.note_layer(jsonfix.LAYER_DIRECT)
+    u.note_layer(jsonfix.LAYER_DIRECT)
+    u.note_layer(jsonfix.LAYER_TRUNCATED)
+    assert u.json_layers == {jsonfix.LAYER_DIRECT: 2, jsonfix.LAYER_TRUNCATED: 1}

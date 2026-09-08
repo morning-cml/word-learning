@@ -57,8 +57,19 @@ function sseBody(events) {
   } }) };
 }
 
+const saved = [];        // POST /api/settings 收到的 patch，验「切档存没存」
+
 w.fetch = async (url, opts = {}) => {
   const p = String(url);
+  if (p === '/api/settings' && opts.method === 'POST') {
+    saved.push(JSON.parse(opts.body));
+    return { ok: true, status: 200, json: async () => ({}) };
+  }
+  //  上次选的是 B1。开页时要把它恢复出来，而不是每次都退回模板里的 B2
+  if (p === '/api/status') return { ok: true, status: 200, json: async () => ({
+    version: '0.4.0', provider: 'deepseek', model: 'deepseek-v4-pro',
+    has_key: true, level: 'B1', cefr: { real_data: true, size: 8653 },
+    backup: { ok: true, count: 1, latest: 'app.db' } }) };
   if (p === '/api/article/plan-preview')
     return { ok:true, status:200, json: async () => ({
       words:['abandon','silence','confess','hesitate','fragile'], count:5,
@@ -87,16 +98,32 @@ check('四档都列出来了', levelRows.length === 4, `${levelRows.length} 行`
 check('词汇量是从接口拉的累计值，不是写死的',
       levelRows.map(r => r.querySelector('.lv-n').textContent).join('|') === '2,307 词|4,446 词|6,863 词|7,777 词',
       levelRows.map(r => r.querySelector('.lv-n').textContent).join('|'));
-check('默认选中的那一档高亮', doc.querySelector('#levels li.on')?.dataset.level === 'B2');
 check('例词用等宽字体列出', levelRows.every(r => r.querySelector('.ex')?.textContent.trim()));
 
+/*  这一档要**记住**。settings.local.json 里一直存着 level、`/api/settings` 一直
+    校验它、`/api/status` 一直回它，可这个下拉框从来不读也不写——于是每次刷新
+    都从模板里那个 selected="B2" 重新开始：选了 B1 生成一篇，回来接着生成第二篇，
+    标尺已经悄悄换回 B2 了。而这一档决定的正是「除目标词以外能用多难的词」，
+    也就是语境线索推不推得出来——改错了没人看得出来（能判断用词超没超 B2 的人
+    本来就不需要这个功能）。桩里 /api/status 回的是 B1，模板默认是 B2。 */
+check('开页时恢复上次选的那一档，而不是模板里的默认档',
+      doc.querySelector('#level').value === 'B1'
+      && doc.querySelector('#levels li.on')?.dataset.level === 'B1',
+      `${doc.querySelector('#level').value} / ${doc.querySelector('#levels li.on')?.dataset.level}`);
+
 //  点一行要真的切档：两处显示同一个状态却各说各话，比只有下拉框还糟
-levelRows[1].dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
-check('点一行就切到那一档', doc.querySelector('#level').value === 'B1');
+levelRows[0].dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+check('点一行就切到那一档', doc.querySelector('#level').value === 'A2');
 check('高亮跟着走且唯一',
       doc.querySelectorAll('#levels li.on').length === 1
-      && doc.querySelector('#levels li.on').dataset.level === 'B1');
+      && doc.querySelector('#levels li.on').dataset.level === 'A2');
+await new Promise(r => setTimeout(r, 20));
+//  程序改 .value 不会触发 change 事件，点一行这条路必须自己存
+check('点一行之后存回服务端', saved.some((s) => s.level === 'A2'), JSON.stringify(saved));
+
 doc.querySelector('#levels li[data-level="B2"]').dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+await new Promise(r => setTimeout(r, 20));
+check('切回去也存', saved[saved.length - 1]?.level === 'B2', JSON.stringify(saved));
 
 const steps = [...doc.querySelectorAll('#timeline .step')];
 const text = doc.querySelector('#timeline').textContent;
